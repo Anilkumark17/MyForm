@@ -9,10 +9,15 @@ import {
 } from "@/lib/survey/questions"
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-const GROQ_MODEL = "llama-3.1-8b-instant"
+/** Strong default; override with GROQ_MODEL in .env if needed. */
+const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 function getGroqApiKey() {
   return process.env.GROQ_API_KEY || process.env.GROQ_API
+}
+
+function getGroqModel() {
+  return process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL
 }
 
 function extractJsonArray(content: string): unknown[] {
@@ -50,8 +55,9 @@ export async function generateMomTestQuestions(input: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
-      temperature: 0.4,
+      model: getGroqModel(),
+      temperature: 0.65,
+      top_p: 0.9,
       messages: [
         { role: "system", content: MOM_TEST_SYSTEM_PROMPT },
         { role: "user", content: buildMomTestUserPrompt(input) },
