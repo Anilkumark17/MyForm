@@ -6,9 +6,13 @@ import { redirect } from "next/navigation"
 import { z } from "zod"
 
 import { generateMomTestQuestions } from "@/lib/ai/groq"
+import {
+  FREE_GENERATION_LIMIT,
+  isGenerationLimitReached,
+} from "@/lib/auth/generation-limits"
 import { requireUser } from "@/lib/auth/session"
 import { db } from "@/lib/db"
-import { projects } from "@/lib/db/schema"
+import { projects, users } from "@/lib/db/schema"
 import type {
   GenerateQuestionsState,
   ProjectFormState,
@@ -137,6 +141,25 @@ export async function generateProjectQuestions(
     return { error: "Project not found." }
   }
 
+  const [account] = await db
+    .select({
+      email: users.email,
+      generationCount: users.generationCount,
+    })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1)
+
+  if (!account) {
+    return { error: "Account not found." }
+  }
+
+  if (isGenerationLimitReached(account.email, account.generationCount)) {
+    return {
+      error: `Your limit is over. Free accounts get ${FREE_GENERATION_LIMIT} AI question generations.`,
+    }
+  }
+
   const icp = project.icp?.trim() ?? ""
   const objectives = project.objectives?.trim() ?? ""
 
@@ -162,6 +185,13 @@ export async function generateProjectQuestions(
         updatedAt: new Date(),
       })
       .where(eq(projects.id, project.id))
+
+    await db
+      .update(users)
+      .set({
+        generationCount: account.generationCount + 1,
+      })
+      .where(eq(users.id, user.id))
 
     revalidatePath(`/dashboard/projects/${project.id}`)
     return { questions }

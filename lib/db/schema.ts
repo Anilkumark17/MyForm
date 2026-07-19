@@ -17,6 +17,8 @@ export const users = pgTable("users", {
   name: varchar("name", { length: 120 }).notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  /** Successful AI question generations used (free tier capped). */
+  generationCount: integer("generation_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

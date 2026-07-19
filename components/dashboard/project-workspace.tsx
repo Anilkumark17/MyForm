@@ -21,6 +21,9 @@ type ProjectWorkspaceProps = {
   objectives: string | null
   questions: SurveyQuestion[]
   submissions: Submission[]
+  generationsRemaining: number | null
+  generationsLimit: number
+  generationsUnlimited: boolean
   baselines: {
     ready: boolean
     minSamplesRequired: number
@@ -51,6 +54,9 @@ export function ProjectWorkspace({
   objectives,
   questions,
   submissions,
+  generationsRemaining,
+  generationsLimit,
+  generationsUnlimited,
   baselines,
 }: ProjectWorkspaceProps) {
   return (
@@ -103,6 +109,9 @@ export function ProjectWorkspace({
             icp={icp}
             objectives={objectives}
             initialQuestions={questions}
+            generationsRemaining={generationsRemaining}
+            generationsLimit={generationsLimit}
+            generationsUnlimited={generationsUnlimited}
           />
         </TabsContent>
 

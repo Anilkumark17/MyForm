@@ -4,6 +4,8 @@ import { notFound } from "next/navigation"
 import { ProjectWorkspace } from "@/components/dashboard/project-workspace"
 import { PageHeader } from "@/components/layout/page-header"
 import { buttonVariants } from "@/components/ui/button"
+import { getGenerationUsage } from "@/lib/auth/generation-usage"
+import { getSessionUser } from "@/lib/auth/session"
 import { getProjectBaselines } from "@/lib/projects/baselines"
 import { getProjectById } from "@/lib/projects/queries"
 import { getProjectSubmissions } from "@/lib/projects/submissions"
@@ -16,10 +18,12 @@ type ProjectPageProps = {
 
 export default async function ProjectPage({ params }: ProjectPageProps) {
   const { id } = await params
-  const [project, submissionRows, baselines] = await Promise.all([
+  const user = await getSessionUser()
+  const [project, submissionRows, baselines, usage] = await Promise.all([
     getProjectById(id),
     getProjectSubmissions(id),
     getProjectBaselines(id),
+    user ? getGenerationUsage(user.id) : Promise.resolve(null),
   ])
 
   if (!project) {
@@ -67,6 +71,9 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
         objectives={project.objectives}
         questions={questions}
         submissions={submissions}
+        generationsRemaining={usage?.remaining ?? 0}
+        generationsLimit={usage?.limit ?? 4}
+        generationsUnlimited={usage?.unlimited ?? false}
         baselines={baselines}
       />
     </div>

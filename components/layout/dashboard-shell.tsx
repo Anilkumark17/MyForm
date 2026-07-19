@@ -18,15 +18,25 @@ const nav = [
 type DashboardShellProps = {
   userName: string
   userEmail: string
+  generationsRemaining: number | null
+  generationsLimit: number
+  generationsUnlimited: boolean
   children: React.ReactNode
 }
 
 export function DashboardShell({
   userName,
   userEmail,
+  generationsRemaining,
+  generationsLimit,
+  generationsUnlimited,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname()
+
+  const generationLabel = generationsUnlimited
+    ? "Unlimited generations"
+    : `${generationsRemaining ?? 0} of ${generationsLimit} left`
 
   return (
     <div className="min-h-screen bg-background">
@@ -64,6 +74,19 @@ export function DashboardShell({
           </div>
 
           <div className="flex items-center gap-3">
+            <div
+              className={cn(
+                "rounded-md px-2.5 py-1 text-xs font-medium tabular-nums",
+                generationsUnlimited
+                  ? "bg-secondary text-muted-foreground"
+                  : generationsRemaining === 0
+                    ? "bg-destructive/15 text-destructive"
+                    : "bg-secondary text-foreground"
+              )}
+              title="AI question generations remaining"
+            >
+              {generationLabel}
+            </div>
             <div className="hidden text-right sm:block">
               <p className="text-sm font-medium leading-none">{userName}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">{userEmail}</p>

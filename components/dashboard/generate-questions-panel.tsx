@@ -27,6 +27,9 @@ type GenerateQuestionsPanelProps = {
   icp: string | null
   objectives: string | null
   initialQuestions: SurveyQuestion[]
+  generationsRemaining: number | null
+  generationsLimit: number
+  generationsUnlimited: boolean
 }
 
 export function GenerateQuestionsPanel({
@@ -34,6 +37,9 @@ export function GenerateQuestionsPanel({
   icp,
   objectives,
   initialQuestions,
+  generationsRemaining,
+  generationsLimit,
+  generationsUnlimited,
 }: GenerateQuestionsPanelProps) {
   const router = useRouter()
   const [questions, setQuestions] = useState(initialQuestions)
@@ -109,13 +115,20 @@ export function GenerateQuestionsPanel({
           <p className="mt-1 text-sm text-muted-foreground">
             Generate Mom Test questions, then edit wording, types, and options.
           </p>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {generationsUnlimited
+              ? "Unlimited AI generations on this account."
+              : generationsRemaining === 0
+                ? "No AI generations left."
+                : `${generationsRemaining} of ${generationsLimit} AI generations left.`}
+          </p>
         </div>
         <Button
           type="button"
           size="lg"
           className="h-9 px-3.5"
           onClick={handleGenerate}
-          disabled={pending}
+          disabled={pending || (!generationsUnlimited && generationsRemaining === 0)}
         >
           {pending
             ? "Generating…"
