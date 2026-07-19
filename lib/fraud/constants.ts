@@ -1,6 +1,12 @@
 /** Minimum clean samples before z-score flagging is active. */
 export const MIN_SAMPLES = 15
 
+/**
+ * Recompute survey mean / std only every N clean responses.
+ * Window times still append every clean submission; the frozen mean is used for z-scores in between.
+ */
+export const MEAN_UPDATE_EVERY = 15
+
 /** Std floor (seconds) — avoids divide-by-zero / over-sensitivity. */
 export const STD_FLOOR_SECONDS = 2
 

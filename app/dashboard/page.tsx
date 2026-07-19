@@ -2,30 +2,50 @@ import Link from "next/link"
 
 import { PageHeader } from "@/components/layout/page-header"
 import { buttonVariants } from "@/components/ui/button"
+import { getAccountUsage } from "@/lib/auth/account-usage"
 import { getSessionUser } from "@/lib/auth/session"
 import { getUserProjects } from "@/lib/projects/queries"
 import { cn } from "@/lib/utils"
 
 export default async function DashboardPage() {
-  const [user, projects] = await Promise.all([
-    getSessionUser(),
+  const user = await getSessionUser()
+  const [projects, usage] = await Promise.all([
     getUserProjects(),
+    user ? getAccountUsage(user.id) : Promise.resolve(null),
   ])
 
   const firstName = user?.name?.split(" ")[0]
+  const atProjectLimit =
+    !usage?.unlimited && (usage?.projects.remaining ?? 0) === 0
 
   return (
     <div>
       <PageHeader
         title={firstName ? `Hi, ${firstName}` : "Projects"}
-        description="Create a project, generate interview questions, embed the form, and review trust scores."
+        description={
+          usage?.unlimited
+            ? "Create a project, generate interview questions, embed the form, and review trust scores."
+            : `Free plan: ${usage?.projects.used ?? 0} of ${usage?.projects.limit ?? 2} projects · ${usage?.generations.remaining ?? 0} of ${usage?.generations.limit ?? 4} AI generations left.`
+        }
         actions={
-          <Link
-            href="/dashboard/projects/new"
-            className={cn(buttonVariants({ size: "lg" }), "h-9 px-3.5")}
-          >
-            New project
-          </Link>
+          atProjectLimit ? (
+            <span
+              className={cn(
+                buttonVariants({ size: "lg", variant: "outline" }),
+                "h-9 cursor-not-allowed px-3.5 opacity-60"
+              )}
+              title="Project limit reached"
+            >
+              Limit reached
+            </span>
+          ) : (
+            <Link
+              href="/dashboard/projects/new"
+              className={cn(buttonVariants({ size: "lg" }), "h-9 px-3.5")}
+            >
+              New project
+            </Link>
+          )
         }
       />
 

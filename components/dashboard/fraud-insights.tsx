@@ -120,6 +120,10 @@ export function FraudInsights({ submissions, baselines }: FraudInsightsProps) {
                 baseline (status: insufficient_data) — no false flags.
               </li>
               <li>
+                The survey mean refreshes every {MIN_SAMPLES} clean responses,
+                not on every submit.
+              </li>
+              <li>
                 After that, flag only if z &lt; {Z_THRESHOLD_LOW}{" "}
                 <span className="text-foreground">and</span> time is under the
                 absolute floor (reading + per-question minimum).

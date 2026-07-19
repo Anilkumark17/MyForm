@@ -1,39 +1,13 @@
-import { eq } from "drizzle-orm"
+import { getAccountUsage } from "@/lib/auth/account-usage"
 
-import {
-  FREE_GENERATION_LIMIT,
-  getRemainingGenerations,
-  hasUnlimitedGenerations,
-} from "@/lib/auth/generation-limits"
-import { db } from "@/lib/db"
-import { users } from "@/lib/db/schema"
-
-export type GenerationUsage = {
-  used: number
-  limit: number
-  remaining: number | null
-  unlimited: boolean
-}
-
-export async function getGenerationUsage(
-  userId: string
-): Promise<GenerationUsage | null> {
-  const [row] = await db
-    .select({
-      email: users.email,
-      generationCount: users.generationCount,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1)
-
-  if (!row) return null
-
-  const unlimited = hasUnlimitedGenerations(row.email)
+/** @deprecated Prefer `getAccountUsage`. */
+export async function getGenerationUsage(userId: string) {
+  const usage = await getAccountUsage(userId)
+  if (!usage) return null
   return {
-    used: row.generationCount,
-    limit: FREE_GENERATION_LIMIT,
-    remaining: getRemainingGenerations(row.email, row.generationCount),
-    unlimited,
+    used: usage.generations.used,
+    limit: usage.generations.limit,
+    remaining: usage.generations.remaining,
+    unlimited: usage.unlimited,
   }
 }

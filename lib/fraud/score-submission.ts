@@ -7,6 +7,7 @@ import { compositeFraudScore } from "@/lib/fraud/composite"
 import {
   ABSOLUTE_TIME_FLOOR_HARD_MIN_SECONDS,
   INSTANT_FLAG_MS,
+  MEAN_UPDATE_EVERY,
   MIN_SAMPLES,
   ROLLING_WINDOW,
   STD_FLOOR_SECONDS,
@@ -71,7 +72,8 @@ export function scoreSubmission(
   const nextStats = appendSample(
     prior,
     completionTimeSeconds,
-    ROLLING_WINDOW
+    ROLLING_WINDOW,
+    { updateMeanEvery: MEAN_UPDATE_EVERY }
   )
 
   // Instant honeypot / absurdly fast — reject without needing baseline
@@ -123,10 +125,12 @@ export function scoreSubmission(
     STRAIGHT_LINE_ENTROPY_FLOOR
   )
 
-  // Score against PRIOR stats so the current sample does not contaminate itself
+  // Score against PRIOR frozen mean so the current sample does not contaminate itself.
+  // Mean only refreshes every MEAN_UPDATE_EVERY clean responses.
+  const baselineProgress = prior.windowTimes.length
   if (prior.sampleCount < MIN_SAMPLES) {
     reasons.push(
-      `Building baseline (${prior.sampleCount}/${MIN_SAMPLES} samples) — not flagging yet.`
+      `Building baseline (${baselineProgress}/${MIN_SAMPLES} samples) — mean updates every ${MEAN_UPDATE_EVERY} responses.`
     )
     return finalize({
       status: "insufficient_data",
@@ -261,12 +265,14 @@ export function welfordStateFromProject(row: {
   fraudRunningMean?: number | null
   fraudRunningM2?: number | null
   fraudSampleCount?: number | null
+  fraudPendingSinceMean?: number | null
   fraudWindowTimes?: number[] | null
 }): WelfordState {
   return {
     runningMean: Number(row.fraudRunningMean) || 0,
     runningM2: Number(row.fraudRunningM2) || 0,
     sampleCount: Number(row.fraudSampleCount) || 0,
+    pendingSinceMeanUpdate: Number(row.fraudPendingSinceMean) || 0,
     windowTimes: Array.isArray(row.fraudWindowTimes)
       ? row.fraudWindowTimes.filter((n) => Number.isFinite(n))
       : [],

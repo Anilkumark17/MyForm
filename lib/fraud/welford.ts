@@ -4,8 +4,12 @@
  * Rolling window tradeoff:
  * True sliding-window Welford (add + remove in O(1)) needs careful M2 correction
  * and is easy to get wrong. We keep the last ROLLING_WINDOW samples and rebuild
- * mean/M2 from that window in O(N) with N≤200. That is correct, simple, and
- * cheap enough to run synchronously on every submission.
+ * mean/M2 from that window in O(N) with N≤200.
+ *
+ * Mean refresh cadence:
+ * Completion times append on every clean response, but running mean / M2 / sampleCount
+ * only rebuild every `updateMeanEvery` samples so the baseline does not drift
+ * after each submission.
  */
 
 export type WelfordState = {
@@ -15,6 +19,8 @@ export type WelfordState = {
   sampleCount: number
   /** Last N completion times in seconds (newest last) */
   windowTimes: number[]
+  /** Clean samples appended since the last mean rebuild */
+  pendingSinceMeanUpdate: number
 }
 
 export function emptyWelfordState(): WelfordState {
@@ -23,6 +29,7 @@ export function emptyWelfordState(): WelfordState {
     runningM2: 0,
     sampleCount: 0,
     windowTimes: [],
+    pendingSinceMeanUpdate: 0,
   }
 }
 
@@ -44,25 +51,54 @@ export function welfordFromValues(values: number[]): WelfordState {
     runningM2: m2,
     sampleCount: n,
     windowTimes: values.filter((v) => Number.isFinite(v)),
+    pendingSinceMeanUpdate: 0,
   }
 }
 
+export type AppendSampleOptions = {
+  /**
+   * Rebuild mean/M2/sampleCount only every N clean appends.
+   * Default 1 = update every sample. Production uses MEAN_UPDATE_EVERY (15).
+   */
+  updateMeanEvery?: number
+}
+
 /**
- * Append one sample, cap to `windowSize`, rebuild stats from the window.
- * Returns the updated state (does not mutate input).
+ * Append one sample, cap to `windowSize`.
+ * Mean/M2/sampleCount rebuild only on the update cadence (see options).
  */
 export function appendSample(
   state: WelfordState,
   x: number,
-  windowSize: number
+  windowSize: number,
+  options?: AppendSampleOptions
 ): WelfordState {
   if (!Number.isFinite(x)) return state
   const windowTimes = [...state.windowTimes, x]
   while (windowTimes.length > windowSize) {
     windowTimes.shift()
   }
+
+  const every = Math.max(1, Math.floor(options?.updateMeanEvery ?? 1))
+  const pendingSinceMeanUpdate = (state.pendingSinceMeanUpdate ?? 0) + 1
+  const shouldRebuildMean = pendingSinceMeanUpdate >= every
+
+  if (!shouldRebuildMean) {
+    return {
+      runningMean: state.runningMean,
+      runningM2: state.runningM2,
+      sampleCount: state.sampleCount,
+      windowTimes,
+      pendingSinceMeanUpdate,
+    }
+  }
+
   const rebuilt = welfordFromValues(windowTimes)
-  return { ...rebuilt, windowTimes }
+  return {
+    ...rebuilt,
+    windowTimes,
+    pendingSinceMeanUpdate: 0,
+  }
 }
 
 /** Sample standard deviation with optional floor to avoid over-sensitivity. */

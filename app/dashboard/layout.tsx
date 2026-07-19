@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 
 import { DashboardShell } from "@/components/layout/dashboard-shell"
-import { getGenerationUsage } from "@/lib/auth/generation-usage"
+import { getAccountUsage } from "@/lib/auth/account-usage"
 import { getSessionUser } from "@/lib/auth/session"
 
 export default async function DashboardLayout({
@@ -14,17 +14,22 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
-  const usage = await getGenerationUsage(user.id)
+  const usage = await getAccountUsage(user.id)
 
   return (
     <DashboardShell
       userName={user.name}
       userEmail={user.email}
       generationsRemaining={
-        usage?.unlimited ? null : (usage?.remaining ?? 0)
+        usage?.unlimited ? null : (usage?.generations.remaining ?? 0)
       }
-      generationsLimit={usage?.limit ?? 4}
-      generationsUnlimited={usage?.unlimited ?? false}
+      generationsLimit={usage?.generations.limit ?? 4}
+      projectsRemaining={
+        usage?.unlimited ? null : (usage?.projects.remaining ?? 0)
+      }
+      projectsLimit={usage?.projects.limit ?? 2}
+      projectsUsed={usage?.projects.used ?? 0}
+      unlimited={usage?.unlimited ?? false}
     >
       {children}
     </DashboardShell>

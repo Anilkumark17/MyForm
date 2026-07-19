@@ -19,6 +19,10 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   /** Successful AI question generations used (free tier capped). */
   generationCount: integer("generation_count").notNull().default(0),
+  /** When we last emailed the admin about this user hitting a free limit. */
+  accessRequestSentAt: timestamp("access_request_sent_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -50,6 +54,10 @@ export const projects = pgTable("projects", {
   /** Welford M2 accumulator for completion time. */
   fraudRunningM2: doublePrecision("fraud_running_m2").notNull().default(0),
   fraudSampleCount: integer("fraud_sample_count").notNull().default(0),
+  /** Clean samples since last mean rebuild (mean refreshes every 15). */
+  fraudPendingSinceMean: integer("fraud_pending_since_mean")
+    .notNull()
+    .default(0),
   /** Last N completion times (seconds) for rolling-window rebuild. */
   fraudWindowTimes: jsonb("fraud_window_times")
     .$type<number[]>()

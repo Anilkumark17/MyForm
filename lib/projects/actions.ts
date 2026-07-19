@@ -1,18 +1,22 @@
 "use server"
 
-import { and, eq } from "drizzle-orm"
+import { and, count, eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 
 import { generateMomTestQuestions } from "@/lib/ai/groq"
 import {
+  ACCESS_REQUEST_EMAIL,
   FREE_GENERATION_LIMIT,
+  FREE_PROJECT_LIMIT,
   isGenerationLimitReached,
-} from "@/lib/auth/generation-limits"
+  isProjectLimitReached,
+} from "@/lib/auth/account-limits"
 import { requireUser } from "@/lib/auth/session"
 import { db } from "@/lib/db"
 import { projects, users } from "@/lib/db/schema"
+import { notifyAccessRequest } from "@/lib/email/access-request"
 import type {
   GenerateQuestionsState,
   ProjectFormState,
@@ -69,6 +73,28 @@ export async function createProject(
     return {
       error: "Please enter a project name.",
       fieldErrors: parsed.error.flatten().fieldErrors,
+    }
+  }
+
+  const [projectCountRow] = await db
+    .select({ value: count() })
+    .from(projects)
+    .where(eq(projects.userId, user.id))
+
+  const projectCount = Number(projectCountRow?.value ?? 0)
+
+  if (isProjectLimitReached(user.email, projectCount)) {
+    const { sent } = await notifyAccessRequest({
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      reason: "projects",
+    })
+
+    return {
+      error: sent
+        ? `Your project limit is over (${FREE_PROJECT_LIMIT}). We emailed ${ACCESS_REQUEST_EMAIL} to request access for you.`
+        : `Your project limit is over (${FREE_PROJECT_LIMIT}). An access request was recorded for ${ACCESS_REQUEST_EMAIL}.`,
     }
   }
 
@@ -155,8 +181,17 @@ export async function generateProjectQuestions(
   }
 
   if (isGenerationLimitReached(account.email, account.generationCount)) {
+    const { sent } = await notifyAccessRequest({
+      userId: user.id,
+      userName: user.name,
+      userEmail: account.email,
+      reason: "generations",
+    })
+
     return {
-      error: `Your limit is over. Free accounts get ${FREE_GENERATION_LIMIT} AI question generations.`,
+      error: sent
+        ? `Your limit is over. Free accounts get ${FREE_GENERATION_LIMIT} AI generations. We emailed ${ACCESS_REQUEST_EMAIL} to request access for you.`
+        : `Your limit is over. Free accounts get ${FREE_GENERATION_LIMIT} AI generations. An access request was recorded for ${ACCESS_REQUEST_EMAIL}.`,
     }
   }
 

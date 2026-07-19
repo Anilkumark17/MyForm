@@ -23,6 +23,7 @@ export async function getProjectBaselines(projectId: string) {
       fraudRunningMean: projects.fraudRunningMean,
       fraudRunningM2: projects.fraudRunningM2,
       fraudSampleCount: projects.fraudSampleCount,
+      fraudPendingSinceMean: projects.fraudPendingSinceMean,
       fraudWindowTimes: projects.fraudWindowTimes,
     })
     .from(projects)

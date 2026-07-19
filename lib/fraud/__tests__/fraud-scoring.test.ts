@@ -5,6 +5,7 @@ import { computeAbsoluteTimeFloor } from "../absolute-floor"
 import { answerPatternEntropy } from "../answer-entropy"
 import { compositeFraudScore } from "../composite"
 import {
+  MEAN_UPDATE_EVERY,
   MIN_SAMPLES,
   STD_FLOOR_SECONDS,
   Z_THRESHOLD_LOW,
@@ -16,6 +17,11 @@ import {
   sampleStd,
   welfordFromValues,
 } from "../welford"
+
+/** Force mean refresh every sample (unit tests that need a live baseline). */
+function appendEvery(state: ReturnType<typeof emptyWelfordState>, x: number) {
+  return appendSample(state, x, 200, { updateMeanEvery: 1 })
+}
 
 function batchSampleVariance(values: number[]): number {
   const n = values.length
@@ -41,11 +47,43 @@ describe("Welford online algorithm", () => {
   })
 })
 
+describe("Welford mean batching", () => {
+  it("freezes mean between MEAN_UPDATE_EVERY samples", () => {
+    let state = emptyWelfordState()
+    for (let i = 0; i < MEAN_UPDATE_EVERY; i++) {
+      state = appendSample(state, 40, 200, {
+        updateMeanEvery: MEAN_UPDATE_EVERY,
+      })
+    }
+    assert.equal(state.sampleCount, MEAN_UPDATE_EVERY)
+    assert.equal(state.runningMean, 40)
+    assert.equal(state.pendingSinceMeanUpdate, 0)
+
+    const meanAfterFirstBatch = state.runningMean
+    for (let i = 0; i < MEAN_UPDATE_EVERY - 1; i++) {
+      state = appendSample(state, 10, 200, {
+        updateMeanEvery: MEAN_UPDATE_EVERY,
+      })
+      assert.equal(state.runningMean, meanAfterFirstBatch)
+      assert.equal(state.sampleCount, MEAN_UPDATE_EVERY)
+      assert.equal(state.pendingSinceMeanUpdate, i + 1)
+    }
+
+    // 30th sample triggers rebuild including the fast times
+    state = appendSample(state, 10, 200, {
+      updateMeanEvery: MEAN_UPDATE_EVERY,
+    })
+    assert.equal(state.sampleCount, MEAN_UPDATE_EVERY * 2)
+    assert.equal(state.pendingSinceMeanUpdate, 0)
+    assert.ok(state.runningMean < meanAfterFirstBatch)
+  })
+})
+
 describe("scoreSubmission", () => {
   it("does not flag when n < MIN_SAMPLES", () => {
     let state = emptyWelfordState()
     for (let i = 0; i < MIN_SAMPLES - 1; i++) {
-      state = appendSample(state, 30 + (i % 5), 200)
+      state = appendEvery(state, 30 + (i % 5))
     }
     const result = scoreSubmission({
       completionTimeSeconds: 2,
@@ -63,7 +101,7 @@ describe("scoreSubmission", () => {
     // Build a healthy baseline ~40s completions
     let state = emptyWelfordState()
     for (let i = 0; i < MIN_SAMPLES + 5; i++) {
-      state = appendSample(state, 40 + (i % 3), 200)
+      state = appendEvery(state, 40 + (i % 3))
     }
     const floor = computeAbsoluteTimeFloor({
       numQuestions: 5,
@@ -88,7 +126,7 @@ describe("scoreSubmission", () => {
     let state = emptyWelfordState()
     // Mean ~60s with some spread
     for (let i = 0; i < MIN_SAMPLES + 10; i++) {
-      state = appendSample(state, 55 + (i % 10), 200)
+      state = appendEvery(state, 55 + (i % 10))
     }
     const floor = computeAbsoluteTimeFloor({
       numQuestions: 3,

@@ -108,7 +108,7 @@ function buildScoringDetails(input: {
 /**
  * Real-time fraud check on submit.
  * Timing is captured silently on the client; respondents never see scores.
- * Per-survey Welford stats update in the same request (background to the user).
+ * Per-survey window times append on clean submits; mean/std refresh every 15.
  */
 export async function processSubmission(
   input: IncomingSubmission
@@ -120,6 +120,7 @@ export async function processSubmission(
       fraudRunningMean: projects.fraudRunningMean,
       fraudRunningM2: projects.fraudRunningM2,
       fraudSampleCount: projects.fraudSampleCount,
+      fraudPendingSinceMean: projects.fraudPendingSinceMean,
       fraudWindowTimes: projects.fraudWindowTimes,
     })
     .from(projects)
@@ -189,6 +190,7 @@ export async function processSubmission(
         fraudRunningMean: score.nextStats.runningMean,
         fraudRunningM2: score.nextStats.runningM2,
         fraudSampleCount: score.nextStats.sampleCount,
+        fraudPendingSinceMean: score.nextStats.pendingSinceMeanUpdate,
         fraudWindowTimes: score.nextStats.windowTimes,
         updatedAt: new Date(),
       })

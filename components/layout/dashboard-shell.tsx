@@ -20,7 +20,10 @@ type DashboardShellProps = {
   userEmail: string
   generationsRemaining: number | null
   generationsLimit: number
-  generationsUnlimited: boolean
+  projectsRemaining: number | null
+  projectsLimit: number
+  projectsUsed: number
+  unlimited: boolean
   children: React.ReactNode
 }
 
@@ -29,14 +32,21 @@ export function DashboardShell({
   userEmail,
   generationsRemaining,
   generationsLimit,
-  generationsUnlimited,
+  projectsRemaining,
+  projectsLimit,
+  projectsUsed,
+  unlimited,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname()
 
-  const generationLabel = generationsUnlimited
-    ? "Unlimited generations"
-    : `${generationsRemaining ?? 0} of ${generationsLimit} left`
+  const generationLabel = unlimited
+    ? "Unlimited gens"
+    : `${generationsRemaining ?? 0}/${generationsLimit} gens`
+
+  const projectLabel = unlimited
+    ? "Unlimited projects"
+    : `${projectsUsed}/${projectsLimit} projects`
 
   return (
     <div className="min-h-screen bg-background">
@@ -55,6 +65,23 @@ export function DashboardShell({
                   item.match === "exact"
                     ? pathname === item.href
                     : pathname.startsWith(item.href)
+                const disabled =
+                  item.href === "/dashboard/projects/new" &&
+                  !unlimited &&
+                  (projectsRemaining ?? 0) === 0
+
+                if (disabled) {
+                  return (
+                    <span
+                      key={item.href}
+                      className="cursor-not-allowed rounded-md px-2.5 py-1.5 text-sm text-muted-foreground/50"
+                      title="Project limit reached"
+                    >
+                      {item.label}
+                    </span>
+                  )
+                }
+
                 return (
                   <Link
                     key={item.href}
@@ -73,19 +100,34 @@ export function DashboardShell({
             </nav>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs font-medium tabular-nums",
-                generationsUnlimited
-                  ? "bg-secondary text-muted-foreground"
-                  : generationsRemaining === 0
-                    ? "bg-destructive/15 text-destructive"
-                    : "bg-secondary text-foreground"
-              )}
-              title="AI question generations remaining"
-            >
-              {generationLabel}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5">
+              <div
+                className={cn(
+                  "rounded-md px-2 py-1 text-xs font-medium tabular-nums",
+                  unlimited
+                    ? "bg-secondary text-muted-foreground"
+                    : (projectsRemaining ?? 0) === 0
+                      ? "bg-destructive/15 text-destructive"
+                      : "bg-secondary text-foreground"
+                )}
+                title="Projects used / free limit"
+              >
+                {projectLabel}
+              </div>
+              <div
+                className={cn(
+                  "rounded-md px-2 py-1 text-xs font-medium tabular-nums",
+                  unlimited
+                    ? "bg-secondary text-muted-foreground"
+                    : generationsRemaining === 0
+                      ? "bg-destructive/15 text-destructive"
+                      : "bg-secondary text-foreground"
+                )}
+                title="AI question generations remaining"
+              >
+                {generationLabel}
+              </div>
             </div>
             <div className="hidden text-right sm:block">
               <p className="text-sm font-medium leading-none">{userName}</p>
