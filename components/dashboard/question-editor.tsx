@@ -6,6 +6,7 @@ import { useState, useTransition } from "react"
 import { ComparisonOptionEditor } from "@/components/dashboard/comparison-option-editor"
 import { ImageFieldInput } from "@/components/dashboard/image-field-input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,6 +16,7 @@ import {
   NativeSelectOption,
 } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
+import { useQuestionCollab } from "@/hooks/use-question-collab"
 import { saveProjectQuestions } from "@/lib/projects/actions"
 import {
   questionTypesByCategory,
@@ -47,10 +49,21 @@ export function QuestionEditor({
   const [error, setError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
 
+  const collab = useQuestionCollab({
+    projectId,
+    questions,
+    onRemoteQuestions: (next) => {
+      setDirty(false)
+      setMessage("Synced from collaborator")
+      onChange(next)
+    },
+  })
+
   function updateQuestions(next: SurveyQuestion[]) {
     setDirty(true)
     setMessage(null)
     onChange(next)
+    collab.publishLocalChange(next)
   }
 
   function updateQuestion(id: string, patch: Partial<SurveyQuestion>) {
@@ -192,6 +205,32 @@ export function QuestionEditor({
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Badge variant={collab.connected ? "secondary" : "outline"}>
+          {collab.connected ? "Live sync on" : "Connecting…"}
+        </Badge>
+        <span>rev {collab.revision}</span>
+        {collab.syncing ? <span>Syncing…</span> : null}
+        {collab.peers.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {collab.peers.map((peer) => (
+              <span
+                key={peer.clientId}
+                className="inline-flex items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5"
+              >
+                <span
+                  className="size-1.5 rounded-full"
+                  style={{ background: peer.color }}
+                />
+                {peer.userName}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span>Only you editing</span>
+        )}
+      </div>
+
       {questions.map((question, index) => {
         const meta = QUESTION_TYPE_MAP[question.type]
         return (

@@ -7,6 +7,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { getAccountUsage } from "@/lib/auth/account-usage"
 import { getSessionUser } from "@/lib/auth/session"
 import { getProjectBaselines } from "@/lib/projects/baselines"
+import { getProjectInvitations } from "@/lib/projects/invitations"
 import { getProjectById } from "@/lib/projects/queries"
 import { getProjectSubmissions } from "@/lib/projects/submissions"
 import { parseProjectQuestions } from "@/lib/projects/utils"
@@ -19,12 +20,14 @@ type ProjectPageProps = {
 export default async function ProjectPage({ params }: ProjectPageProps) {
   const { id } = await params
   const user = await getSessionUser()
-  const [project, submissionRows, baselines, usage] = await Promise.all([
-    getProjectById(id),
-    getProjectSubmissions(id),
-    getProjectBaselines(id),
-    user ? getAccountUsage(user.id) : Promise.resolve(null),
-  ])
+  const [project, submissionRows, baselines, usage, invitations] =
+    await Promise.all([
+      getProjectById(id),
+      getProjectSubmissions(id),
+      getProjectBaselines(id),
+      user ? getAccountUsage(user.id) : Promise.resolve(null),
+      getProjectInvitations(id),
+    ])
 
   if (!project) {
     notFound()
@@ -52,13 +55,16 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 
       <PageHeader
         title={project.name}
-        description={`Created ${created} · ${submissions.length} response${submissions.length === 1 ? "" : "s"} · ${questions.length} question${questions.length === 1 ? "" : "s"}`}
+        description={`${project.accessRole === "shared" ? "Shared with you · " : ""}Created ${created} · ${submissions.length} response${submissions.length === 1 ? "" : "s"} · ${questions.length} question${questions.length === 1 ? "" : "s"} · live OT sync`}
         actions={
           <Link
             href={`/f/${project.id}`}
             target="_blank"
             rel="noreferrer"
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8")}
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              "h-8"
+            )}
           >
             Open form
           </Link>
@@ -67,10 +73,13 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 
       <ProjectWorkspace
         projectId={project.id}
+        projectName={project.name}
         icp={project.icp}
         objectives={project.objectives}
         questions={questions}
         submissions={submissions}
+        invitations={invitations}
+        isOwner={project.accessRole === "owner"}
         generationsRemaining={usage?.generations.remaining ?? 0}
         generationsLimit={usage?.generations.limit ?? 4}
         generationsUnlimited={usage?.unlimited ?? false}

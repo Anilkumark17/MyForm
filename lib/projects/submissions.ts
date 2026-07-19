@@ -1,9 +1,10 @@
-import { and, desc, eq } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { redirect } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/session"
+import { getAccessibleProject } from "@/lib/collab/access"
 import { db } from "@/lib/db"
-import { projects, submissions } from "@/lib/db/schema"
+import { submissions } from "@/lib/db/schema"
 
 export async function getProjectSubmissions(projectId: string) {
   const user = await requireUser()
@@ -11,13 +12,8 @@ export async function getProjectSubmissions(projectId: string) {
     redirect("/login")
   }
 
-  const [ownedProject] = await db
-    .select({ id: projects.id })
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
-    .limit(1)
-
-  if (!ownedProject) {
+  const access = await getAccessibleProject(projectId, user.id)
+  if (!access) {
     return null
   }
 

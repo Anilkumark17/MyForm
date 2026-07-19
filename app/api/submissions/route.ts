@@ -30,22 +30,14 @@ export async function POST(request: Request) {
 
   try {
     const result = await processSubmission(parsed.data)
+    // Public clients must not learn which responses were labeled fake.
     return NextResponse.json({
       id: result.submission.id,
-      // Intentionally omit fraud details from public clients in production UX;
-      // kept here for dashboard debugging of the API. Public form ignores these.
-      trustScore: result.submission.trustScore,
-      flagStatus: result.submission.flagStatus,
-      fraudStatus: result.fraudStatus,
-      zScore: result.zScore,
-      flaggedImmediately: result.flaggedImmediately,
-      baselineUsed: result.baselineUsed,
-      zScores: result.zScores,
-      reasons: result.reasons,
-      scoringDetails: result.scoringDetails,
+      ok: true,
       createdAt: result.submission.createdAt,
     })
   } catch (error) {
+    console.error("POST /api/submissions failed:", error)
     const message =
       error instanceof Error ? error.message : "Could not process submission."
     const status = message === "Form not found." ? 404 : 500

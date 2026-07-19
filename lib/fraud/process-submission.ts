@@ -9,6 +9,7 @@ import {
   welfordStateFromProject,
 } from "@/lib/fraud/score-submission"
 import { deriveFieldMetrics } from "@/lib/fraud/signals"
+import { notifyOwnerFakeFlagged } from "@/lib/notifications/fake-flagged"
 import { parseSurveyQuestions } from "@/lib/survey/questions"
 import { db } from "@/lib/db"
 import {
@@ -97,9 +98,10 @@ function buildScoringDetails(input: {
     completionTimeSeconds: input.completionTimeSeconds,
     thresholds: {
       minSamples: MIN_SAMPLES,
-      zFlag: -2.5,
-      zReject: -3.0,
+      zFlag: 0,
+      zReject: -1.5,
       instantFlagMs: INSTANT_FLAG_MS,
+      meanUpdateEvery: 15,
     },
     summary: score.reasons.join(" "),
   }
@@ -183,6 +185,7 @@ export async function processSubmission(
     .returning()
 
   // Update per-survey running stats after insert (silent to respondent)
+  // Flagged / rejected fakes never enter the valid baseline.
   if (score.shouldUpdateStats) {
     await db
       .update(projects)
@@ -195,6 +198,20 @@ export async function processSubmission(
         updatedAt: new Date(),
       })
       .where(eq(projects.id, input.formId))
+  }
+
+  // Never block the respondent on notification failures.
+  if (
+    (score.status === "flagged" || score.status === "rejected") &&
+    score.zScore != null
+  ) {
+    void notifyOwnerFakeFlagged({
+      projectId: input.formId,
+      submissionId: submission.id,
+      fraudStatus: score.status,
+      zScore: score.zScore,
+      reasons: score.reasons,
+    })
   }
 
   return {

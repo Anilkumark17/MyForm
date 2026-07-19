@@ -14,6 +14,8 @@ import {
   isProjectLimitReached,
 } from "@/lib/auth/account-limits"
 import { requireUser } from "@/lib/auth/session"
+import { getAccessibleProject } from "@/lib/collab/access"
+import { acceptQuestionOp } from "@/lib/collab/server"
 import { db } from "@/lib/db"
 import { projects, users } from "@/lib/db/schema"
 import { notifyAccessRequest } from "@/lib/email/access-request"
@@ -52,6 +54,11 @@ async function getOwnedProject(projectId: string, userId: string) {
     .limit(1)
 
   return project ?? null
+}
+
+async function getEditableProject(projectId: string, userId: string) {
+  const access = await getAccessibleProject(projectId, userId)
+  return access?.project ?? null
 }
 
 export async function createProject(
@@ -135,7 +142,7 @@ export async function updateProjectContext(
     }
   }
 
-  const project = await getOwnedProject(parsed.data.projectId, user.id)
+  const project = await getEditableProject(parsed.data.projectId, user.id)
   if (!project) {
     return { error: "Project not found." }
   }
@@ -162,7 +169,7 @@ export async function generateProjectQuestions(
     redirect("/login")
   }
 
-  const project = await getOwnedProject(projectId, user.id)
+  const project = await getEditableProject(projectId, user.id)
   if (!project) {
     return { error: "Project not found." }
   }
@@ -213,13 +220,14 @@ export async function generateProjectQuestions(
       objectives,
     })
 
-    await db
-      .update(projects)
-      .set({
-        questions: JSON.stringify(questions),
-        updatedAt: new Date(),
-      })
-      .where(eq(projects.id, project.id))
+    await acceptQuestionOp({
+      projectId: project.id,
+      userId: user.id,
+      userName: user.name,
+      clientId: `generate-${user.id}`,
+      baseRevision: project.questionsRevision ?? 0,
+      op: { type: "replace_all", questions },
+    })
 
     await db
       .update(users)
@@ -249,7 +257,7 @@ export async function saveProjectQuestions(
     redirect("/login")
   }
 
-  const project = await getOwnedProject(projectId, user.id)
+  const project = await getEditableProject(projectId, user.id)
   if (!project) {
     return { error: "Project not found." }
   }
@@ -267,13 +275,18 @@ export async function saveProjectQuestions(
     }))
     .filter((item) => item.prompt.length > 0)
 
-  await db
-    .update(projects)
-    .set({
-      questions: JSON.stringify(questions),
-      updatedAt: new Date(),
-    })
-    .where(eq(projects.id, project.id))
+  const accepted = await acceptQuestionOp({
+    projectId: project.id,
+    userId: user.id,
+    userName: user.name,
+    clientId: `save-${user.id}`,
+    baseRevision: project.questionsRevision ?? 0,
+    op: { type: "replace_all", questions },
+  })
+
+  if (!accepted.ok) {
+    return { error: accepted.error ?? "Could not save questions." }
+  }
 
   revalidatePath(`/dashboard/projects/${project.id}`)
   return { ok: true }

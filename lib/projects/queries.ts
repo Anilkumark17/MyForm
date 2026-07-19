@@ -1,9 +1,11 @@
-import { and, desc, eq } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { redirect } from "next/navigation"
 
+import {
+  getAccessibleProject,
+  listAccessibleProjects,
+} from "@/lib/collab/access"
 import { requireUser } from "@/lib/auth/session"
-import { db } from "@/lib/db"
-import { projects } from "@/lib/db/schema"
 
 export async function getUserProjects() {
   const user = await requireUser()
@@ -11,11 +13,11 @@ export async function getUserProjects() {
     redirect("/login")
   }
 
-  return db
-    .select()
-    .from(projects)
-    .where(eq(projects.userId, user.id))
-    .orderBy(desc(projects.createdAt))
+  const rows = await listAccessibleProjects(user.id)
+  return rows.map((row) => ({
+    ...row.project,
+    accessRole: row.role,
+  }))
 }
 
 export async function getProjectById(projectId: string) {
@@ -24,11 +26,11 @@ export async function getProjectById(projectId: string) {
     redirect("/login")
   }
 
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
-    .limit(1)
+  const access = await getAccessibleProject(projectId, user.id)
+  if (!access) return null
 
-  return project ?? null
+  return {
+    ...access.project,
+    accessRole: access.role === "owner" ? ("owner" as const) : ("shared" as const),
+  }
 }

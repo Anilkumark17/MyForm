@@ -1,111 +1,190 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 
 import { ComparisonResults } from "@/components/dashboard/comparison-results"
+import { ResponseCharts } from "@/components/dashboard/response-charts"
+import { SubmissionsTable } from "@/components/dashboard/submissions-table"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Submission } from "@/lib/db/schema"
-import { formatComparisonForList } from "@/lib/projects/comparison-analytics"
+import { downloadSubmissionsExcel } from "@/lib/projects/export-excel"
 import {
   buildQuestionAggregates,
-  formatAnswerValue,
   questionTypeLabel,
   type QuestionAggregate,
 } from "@/lib/projects/response-analytics"
+import { splitSubmissions } from "@/lib/projects/submission-filters"
 import type { SurveyQuestion } from "@/lib/survey/questions"
-import { cn } from "@/lib/utils"
-import { ChevronDownIcon } from "lucide-react"
 
 type ResponsesPanelProps = {
+  projectName: string
   questions: SurveyQuestion[]
   submissions: Submission[]
 }
 
 export function ResponsesPanel({
+  projectName,
   questions,
   submissions,
 }: ResponsesPanelProps) {
+  const { valid, fake } = useMemo(
+    () => splitSubmissions(submissions),
+    [submissions]
+  )
+
   const aggregates = useMemo(
-    () => buildQuestionAggregates(questions, submissions),
-    [questions, submissions]
+    () => buildQuestionAggregates(questions, valid),
+    [questions, valid]
   )
   const comparisonQuestions = useMemo(
     () => questions.filter((q) => q.type === "comparison_choice"),
     [questions]
   )
 
-  const cleanCount = submissions.filter((row) => row.flagStatus === "clean").length
-  const flaggedCount = submissions.length - cleanCount
+  function handleExport() {
+    downloadSubmissionsExcel({
+      projectName,
+      questions,
+      submissions,
+    })
+  }
 
   return (
     <div>
-      <div className="mb-5">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">
-          Responses
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {submissions.length} total · {cleanCount} clean · {flaggedCount}{" "}
-          flagged
-        </p>
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-tight">
+            Responses
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {valid.length} valid · {fake.length} flagged fake ·{" "}
+            {submissions.length} total
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Z-score flags fakes. They are removed from charts, tables, and the
+            Valid Excel sheet.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8"
+          onClick={handleExport}
+          disabled={submissions.length === 0}
+        >
+          Export Excel
+        </Button>
       </div>
+
+      {fake.length > 0 ? (
+        <Alert className="mb-5 border-destructive/40 bg-destructive/10">
+          <AlertDescription>
+            {fake.length} submission{fake.length === 1 ? "" : "s"} flagged as
+            fake by z-score and kept out of your actual results. Review them in
+            the Flagged fake tab.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {submissions.length === 0 ? (
         <div className="surface rounded-lg px-5 py-10 text-center">
           <p className="text-sm text-muted-foreground">
-            No responses yet. Share the form link or embed to start collecting.
+            No responses yet. Share the form link, invite friends, or embed to
+            start collecting.
           </p>
         </div>
       ) : (
-        <Tabs defaultValue="grouped" className="gap-4">
-          <TabsList variant="line" className="h-auto w-full justify-start rounded-none border-b border-border bg-transparent p-0">
-            <TabsTrigger value="grouped" className="rounded-none px-3 pb-2.5 pt-0">
-              By question
+        <Tabs defaultValue="insights" className="gap-4">
+          <TabsList
+            variant="line"
+            className="h-auto w-full justify-start overflow-x-auto rounded-none border-b border-border bg-transparent p-0"
+          >
+            <TabsTrigger
+              value="insights"
+              className="rounded-none px-3 pb-2.5 pt-0"
+            >
+              Insights
             </TabsTrigger>
-            <TabsTrigger value="individual" className="rounded-none px-3 pb-2.5 pt-0">
-              Individual
+            <TabsTrigger
+              value="table"
+              className="rounded-none px-3 pb-2.5 pt-0"
+            >
+              Table
+              <span className="ml-1.5 text-muted-foreground">{valid.length}</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="flagged"
+              className="rounded-none px-3 pb-2.5 pt-0"
+            >
+              Flagged fake
+              <span className="ml-1.5 text-muted-foreground">{fake.length}</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="grouped"
+              className="rounded-none px-3 pb-2.5 pt-0"
+            >
+              By question
             </TabsTrigger>
           </TabsList>
 
-            <TabsContent value="grouped" className="mt-4 space-y-4">
-              {comparisonQuestions.map((question) => (
-                <ComparisonResults
-                  key={question.id}
-                  question={question}
-                  submissions={submissions}
-                />
-              ))}
-              {aggregates.length === 0 && comparisonQuestions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Add questions to see grouped response breakdowns.
-                </p>
-              ) : (
-                aggregates
-                  .filter((aggregate) => aggregate.question.type !== "comparison_choice")
-                  .map((aggregate) => (
-                    <QuestionGroupCard
-                      key={aggregate.question.id}
-                      aggregate={aggregate}
-                    />
-                  ))
-              )}
-            </TabsContent>
+          <TabsContent value="insights" className="mt-4">
+            <ResponseCharts questions={questions} submissions={submissions} />
+          </TabsContent>
 
-          <TabsContent value="individual" className="mt-0 space-y-3">
-            {submissions.map((submission, index) => (
-              <IndividualResponseCard
-                key={submission.id}
-                submission={submission}
-                questions={questions}
-                index={submissions.length - index}
-                defaultOpen={index === 0}
+          <TabsContent value="table" className="mt-4">
+            <SubmissionsTable
+              questions={questions}
+              submissions={valid}
+              emptyLabel="No valid submissions yet."
+              variant="valid"
+            />
+          </TabsContent>
+
+          <TabsContent value="flagged" className="mt-4 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Flagged by z-score (and reinforcing signals). Excluded from valid
+              output, charts, and the main Excel sheet.
+            </p>
+            <SubmissionsTable
+              questions={questions}
+              submissions={fake}
+              emptyLabel="No flagged submissions."
+              variant="fake"
+            />
+          </TabsContent>
+
+          <TabsContent value="grouped" className="mt-4 space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Charts use valid responses only ({valid.length}).
+            </p>
+            {comparisonQuestions.map((question) => (
+              <ComparisonResults
+                key={question.id}
+                question={question}
+                submissions={valid}
               />
             ))}
+            {aggregates.length === 0 && comparisonQuestions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Add questions to see grouped response breakdowns.
+              </p>
+            ) : (
+              aggregates
+                .filter(
+                  (aggregate) =>
+                    aggregate.question.type !== "comparison_choice"
+                )
+                .map((aggregate) => (
+                  <QuestionGroupCard
+                    key={aggregate.question.id}
+                    aggregate={aggregate}
+                  />
+                ))
+            )}
           </TabsContent>
         </Tabs>
       )}
@@ -114,8 +193,15 @@ export function ResponsesPanel({
 }
 
 function QuestionGroupCard({ aggregate }: { aggregate: QuestionAggregate }) {
-  const { question, kind, responseCount, emptyCount, buckets, numeric, textSamples } =
-    aggregate
+  const {
+    question,
+    kind,
+    responseCount,
+    emptyCount,
+    buckets,
+    numeric,
+    textSamples,
+  } = aggregate
   const maxCount = Math.max(1, ...buckets.map((bucket) => bucket.count))
 
   return (
@@ -184,105 +270,6 @@ function QuestionGroupCard({ aggregate }: { aggregate: QuestionAggregate }) {
         </ul>
       ) : null}
     </div>
-  )
-}
-
-function IndividualResponseCard({
-  submission,
-  questions,
-  index,
-  defaultOpen,
-}: {
-  submission: Submission
-  questions: SurveyQuestion[]
-  index: number
-  defaultOpen?: boolean
-}) {
-  const [open, setOpen] = useState(Boolean(defaultOpen))
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="surface rounded-lg">
-        <CollapsibleTrigger
-          className={cn(
-            "flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-          )}
-        >
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Response #{index}</p>
-            <p className="text-xs text-muted-foreground">
-              {submission.createdAt.toLocaleString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-                timeZone: "UTC",
-              })}{" "}
-              · {(submission.totalCompletionTimeMs / 1000).toFixed(1)}s
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={
-                submission.fraudStatus === "rejected" ||
-                submission.fraudStatus === "flagged" ||
-                submission.flagStatus === "flagged"
-                  ? "destructive"
-                  : "secondary"
-              }
-            >
-              {submission.fraudStatus ?? submission.flagStatus}
-            </Badge>
-            <Badge variant="outline">Trust {submission.trustScore}</Badge>
-            {submission.zScore != null ? (
-              <Badge variant="outline">z={submission.zScore.toFixed(2)}</Badge>
-            ) : null}
-            <ChevronDownIcon
-              className={cn(
-                "size-4 text-muted-foreground transition-transform",
-                open && "rotate-180"
-              )}
-            />
-          </div>
-        </CollapsibleTrigger>
-
-        <CollapsibleContent className="border-t border-border px-4 py-3">
-          <div className="space-y-3">
-            {submission.scoringDetails &&
-            typeof submission.scoringDetails === "object" &&
-            "summary" in submission.scoringDetails ? (
-              <div className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                <p className="font-medium text-foreground">Trust scoring</p>
-                <p className="mt-1">
-                  {String(
-                    (submission.scoringDetails as { summary?: string }).summary
-                  )}
-                </p>
-              </div>
-            ) : null}
-            {questions.map((question) => (
-              <div key={question.id} className="text-sm">
-                <p className="text-muted-foreground">{question.prompt}</p>
-                <p className="mt-1 font-medium whitespace-pre-wrap break-words">
-                  {question.type === "comparison_choice"
-                    ? formatComparisonForList(
-                        question,
-                        submission.answers?.[question.id]
-                      )
-                    : formatAnswerValue(submission.answers?.[question.id])}
-                </p>
-              </div>
-            ))}
-            {questions.length === 0 ? (
-              <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 text-xs">
-                {JSON.stringify(submission.answers, null, 2)}
-              </pre>
-            ) : null}
-          </div>
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
   )
 }
 

@@ -63,10 +63,53 @@ export const projects = pgTable("projects", {
     .$type<number[]>()
     .notNull()
     .default([]),
+  /** OT revision for collaborative question editing. */
+  questionsRevision: integer("questions_revision").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+/** Accepted invitees who can edit the project (shared workspace). */
+export const projectCollaborators = pgTable(
+  "project_collaborators",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 20 }).notNull().default("editor"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("project_collaborators_project_user_uidx").on(
+      table.projectId,
+      table.userId
+    ),
+  ]
+)
+
+/** Applied OT operations for question document sync. */
+export const projectOps = pgTable("project_ops", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  revision: integer("revision").notNull(),
+  clientId: varchar("client_id", { length: 64 }).notNull(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  op: jsonb("op").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
 })
@@ -108,6 +151,44 @@ export const submissions = pgTable("submissions", {
     .notNull(),
 })
 
+/** In-app alerts for project owners (e.g. fake submission flagged). */
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "cascade",
+  }),
+  submissionId: uuid("submission_id").references(() => submissions.id, {
+    onDelete: "set null",
+  }),
+  type: varchar("type", { length: 40 }).notNull().default("fake_flagged"),
+  title: varchar("title", { length: 200 }).notNull(),
+  body: text("body").notNull(),
+  read: boolean("read").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+/** Friend / collaborator invitations to a project. */
+export const invitations = pgTable("invitations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  inviterId: uuid("inviter_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  inviteeEmail: varchar("invitee_email", { length: 255 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  respondedAt: timestamp("responded_at", { withTimezone: true }),
+})
+
 export const formBaselines = pgTable(
   "form_baselines",
   {
@@ -133,6 +214,19 @@ export const formBaselines = pgTable(
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   projects: many(projects),
+  sentInvitations: many(invitations),
+  notifications: many(notifications),
+}))
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, {
+    fields: [notifications.userId],
+    references: [users.id],
+  }),
+  project: one(projects, {
+    fields: [notifications.projectId],
+    references: [projects.id],
+  }),
 }))
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -149,6 +243,45 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   submissions: many(submissions),
   baselines: many(formBaselines),
+  invitations: many(invitations),
+  collaborators: many(projectCollaborators),
+  ops: many(projectOps),
+}))
+
+export const projectCollaboratorsRelations = relations(
+  projectCollaborators,
+  ({ one }) => ({
+    project: one(projects, {
+      fields: [projectCollaborators.projectId],
+      references: [projects.id],
+    }),
+    user: one(users, {
+      fields: [projectCollaborators.userId],
+      references: [users.id],
+    }),
+  })
+)
+
+export const projectOpsRelations = relations(projectOps, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectOps.projectId],
+    references: [projects.id],
+  }),
+  user: one(users, {
+    fields: [projectOps.userId],
+    references: [users.id],
+  }),
+}))
+
+export const invitationsRelations = relations(invitations, ({ one }) => ({
+  project: one(projects, {
+    fields: [invitations.projectId],
+    references: [projects.id],
+  }),
+  inviter: one(users, {
+    fields: [invitations.inviterId],
+    references: [users.id],
+  }),
 }))
 
 export const submissionsRelations = relations(submissions, ({ one }) => ({
@@ -169,8 +302,13 @@ export type User = typeof users.$inferSelect
 export type Session = typeof sessions.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Submission = typeof submissions.$inferSelect
+export type Invitation = typeof invitations.$inferSelect
+export type ProjectCollaborator = typeof projectCollaborators.$inferSelect
+export type ProjectOp = typeof projectOps.$inferSelect
+export type Notification = typeof notifications.$inferSelect
 export type FormBaseline = typeof formBaselines.$inferSelect
 export type FlagStatus = "clean" | "flagged"
+export type InvitationStatus = "pending" | "accepted" | "declined"
 export type FraudStatus =
   | "insufficient_data"
   | "normal"

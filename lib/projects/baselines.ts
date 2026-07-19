@@ -1,9 +1,10 @@
-import { and, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { redirect } from "next/navigation"
 
 import { requireUser } from "@/lib/auth/session"
+import { getAccessibleProject } from "@/lib/collab/access"
 import { db } from "@/lib/db"
-import { formBaselines, projects } from "@/lib/db/schema"
+import { formBaselines } from "@/lib/db/schema"
 import { MIN_SAMPLES, STD_FLOOR_SECONDS } from "@/lib/fraud/constants"
 import {
   describeSurveyStats,
@@ -17,21 +18,10 @@ export async function getProjectBaselines(projectId: string) {
     redirect("/login")
   }
 
-  const [owned] = await db
-    .select({
-      id: projects.id,
-      fraudRunningMean: projects.fraudRunningMean,
-      fraudRunningM2: projects.fraudRunningM2,
-      fraudSampleCount: projects.fraudSampleCount,
-      fraudPendingSinceMean: projects.fraudPendingSinceMean,
-      fraudWindowTimes: projects.fraudWindowTimes,
-    })
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
-    .limit(1)
+  const access = await getAccessibleProject(projectId, user.id)
+  if (!access) return null
 
-  if (!owned) return null
-
+  const owned = access.project
   const state = welfordStateFromProject(owned)
   const stats = describeSurveyStats(state)
   const std = sampleStd(state, STD_FLOOR_SECONDS)

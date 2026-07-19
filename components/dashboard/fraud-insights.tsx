@@ -104,7 +104,7 @@ export function FraudInsights({ submissions, baselines }: FraudInsightsProps) {
             <Stat
               label="Normal / flagged"
               value={`${normalCount} / ${flaggedCount}`}
-              hint={`Flag z < ${Z_THRESHOLD_LOW}, reject z < ${Z_THRESHOLD_REJECT}`}
+              hint={`Flag z < ${Z_THRESHOLD_LOW} (after baseline), reject z < ${Z_THRESHOLD_REJECT}`}
             />
           </div>
 
@@ -116,17 +116,17 @@ export function FraudInsights({ submissions, baselines }: FraudInsightsProps) {
                 honeypot → <Badge variant="destructive">rejected</Badge>.
               </li>
               <li>
-                First {MIN_SAMPLES} submissions build this survey&apos;s
-                baseline (status: insufficient_data) — no false flags.
+                First {MIN_SAMPLES} clean submissions build the survey mean —
+                none are labeled fake.
               </li>
               <li>
-                The survey mean refreshes every {MIN_SAMPLES} clean responses,
-                not on every submit.
+                Mean refreshes every {MIN_SAMPLES} clean responses (not every
+                submit).
               </li>
               <li>
-                After that, flag only if z &lt; {Z_THRESHOLD_LOW}{" "}
-                <span className="text-foreground">and</span> time is under the
-                absolute floor (reading + per-question minimum).
+                From submission {MIN_SAMPLES + 1} onward, any negative z-score
+                (faster than the peer mean) is flagged fake and removed from
+                valid output.
               </li>
             </ol>
           </div>

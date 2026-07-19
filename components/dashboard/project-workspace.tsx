@@ -3,6 +3,7 @@
 import { EmbedBuilder } from "@/components/dashboard/embed-builder"
 import { FraudInsights } from "@/components/dashboard/fraud-insights"
 import { GenerateQuestionsPanel } from "@/components/dashboard/generate-questions-panel"
+import { InviteFriendsPanel } from "@/components/dashboard/invite-friends-panel"
 import { ResponsesPanel } from "@/components/dashboard/responses-panel"
 import {
   Card,
@@ -17,10 +18,18 @@ import type { SurveyQuestion } from "@/lib/survey/questions"
 
 type ProjectWorkspaceProps = {
   projectId: string
+  projectName: string
   icp: string | null
   objectives: string | null
   questions: SurveyQuestion[]
   submissions: Submission[]
+  invitations: Array<{
+    id: string
+    inviteeEmail: string
+    status: string
+    createdAt: Date
+  }>
+  isOwner: boolean
   generationsRemaining: number | null
   generationsLimit: number
   generationsUnlimited: boolean
@@ -50,10 +59,13 @@ type ProjectWorkspaceProps = {
 
 export function ProjectWorkspace({
   projectId,
+  projectName,
   icp,
   objectives,
   questions,
   submissions,
+  invitations,
+  isOwner,
   generationsRemaining,
   generationsLimit,
   generationsUnlimited,
@@ -83,6 +95,14 @@ export function ProjectWorkspace({
               </span>
             ) : null}
           </TabsTrigger>
+          {isOwner ? (
+            <TabsTrigger
+              value="invite"
+              className="rounded-none px-3 pb-3 pt-0 data-active:bg-transparent"
+            >
+              Invite
+            </TabsTrigger>
+          ) : null}
           <TabsTrigger
             value="embed"
             className="rounded-none px-3 pb-3 pt-0 data-active:bg-transparent"
@@ -116,8 +136,21 @@ export function ProjectWorkspace({
         </TabsContent>
 
         <TabsContent value="responses" className="mt-0">
-          <ResponsesPanel questions={questions} submissions={submissions} />
+          <ResponsesPanel
+            projectName={projectName}
+            questions={questions}
+            submissions={submissions}
+          />
         </TabsContent>
+
+        {isOwner ? (
+          <TabsContent value="invite" className="mt-0">
+            <InviteFriendsPanel
+              projectId={projectId}
+              invitations={invitations}
+            />
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="embed" className="mt-0">
           <EmbedBuilder formId={projectId} />

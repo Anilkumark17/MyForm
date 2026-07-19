@@ -1,4 +1,5 @@
 import type { Submission } from "@/lib/db/schema"
+import { isFakeSubmission } from "@/lib/projects/submission-filters"
 import {
   formatComparisonAnswer,
   getSelectionMode,
@@ -198,13 +199,13 @@ export function buildComparisonAggregate(
     ? 0
     : submissions.filter(
         (row) =>
-          row.flagStatus === "flagged" &&
+          isFakeSubmission(row) &&
           parseComparisonAnswer(row.answers?.[question.id]) != null
       ).length
 
   const pool = includeFlagged
     ? submissions
-    : submissions.filter((row) => row.flagStatus !== "flagged")
+    : submissions.filter((row) => !isFakeSubmission(row))
 
   const mode = getSelectionMode(question.config)
   const { totals, responseCount } = accumulate(question, pool)

@@ -76,7 +76,75 @@ export function scoreSubmission(
     { updateMeanEvery: MEAN_UPDATE_EVERY }
   )
 
-  // Instant honeypot / absurdly fast — reject without needing baseline
+  const answerEntropy = answerPatternEntropy(input.answerPattern)
+  const straightLining = isStraightLining(
+    input.answerPattern,
+    STRAIGHT_LINE_ENTROPY_FLOOR
+  )
+
+  /**
+   * Baseline phase (first 15 clean samples that commit the mean):
+   * never label a response as fake — USP starts at submission 16.
+   * Honeypot / sub-1.5s bots are still dropped from the baseline silently.
+   */
+  const baselineReady = prior.sampleCount >= MIN_SAMPLES
+
+  if (!baselineReady) {
+    if (input.honeypotFilled) {
+      reasons.push("Honeypot field filled (likely bot).")
+      return finalize({
+        status: "rejected",
+        zScore: null,
+        reasons,
+        trustScore: 0,
+        absoluteTimeFloor,
+        answerEntropy,
+        straightLining,
+        signalZScores: {},
+        shouldUpdateStats: false,
+        nextStats: prior,
+        completionTimeSeconds,
+      })
+    }
+
+    if (completionTimeSeconds * 1000 < INSTANT_FLAG_MS) {
+      reasons.push(
+        `Completed in ${(completionTimeSeconds * 1000).toFixed(0)}ms (under ${INSTANT_FLAG_MS}ms).`
+      )
+      return finalize({
+        status: "rejected",
+        zScore: null,
+        reasons,
+        trustScore: 0,
+        absoluteTimeFloor,
+        answerEntropy,
+        straightLining,
+        signalZScores: {},
+        shouldUpdateStats: false,
+        nextStats: prior,
+        completionTimeSeconds,
+      })
+    }
+
+    reasons.push(
+      `Baseline learning (${Math.min(prior.windowTimes.length + 1, MIN_SAMPLES)}/${MIN_SAMPLES}). No fake labels until the mean is ready; mean refreshes every ${MEAN_UPDATE_EVERY} clean responses.`
+    )
+    return finalize({
+      status: "insufficient_data",
+      zScore: null,
+      reasons,
+      trustScore: 70,
+      absoluteTimeFloor,
+      answerEntropy,
+      straightLining,
+      signalZScores: {},
+      shouldUpdateStats: true,
+      nextStats,
+      completionTimeSeconds,
+    })
+  }
+
+  // After baseline: honeypot / instant still hard-reject
   if (input.honeypotFilled) {
     reasons.push("Honeypot field filled (likely bot).")
     return finalize({
@@ -85,11 +153,8 @@ export function scoreSubmission(
       reasons,
       trustScore: 0,
       absoluteTimeFloor,
-      answerEntropy: answerPatternEntropy(input.answerPattern),
-      straightLining: isStraightLining(
-        input.answerPattern,
-        STRAIGHT_LINE_ENTROPY_FLOOR
-      ),
+      answerEntropy,
+      straightLining,
       signalZScores: {},
       shouldUpdateStats: false,
       nextStats: prior,
@@ -107,11 +172,8 @@ export function scoreSubmission(
       reasons,
       trustScore: 0,
       absoluteTimeFloor,
-      answerEntropy: answerPatternEntropy(input.answerPattern),
-      straightLining: isStraightLining(
-        input.answerPattern,
-        STRAIGHT_LINE_ENTROPY_FLOOR
-      ),
+      answerEntropy,
+      straightLining,
       signalZScores: {},
       shouldUpdateStats: false,
       nextStats: prior,
@@ -119,34 +181,7 @@ export function scoreSubmission(
     })
   }
 
-  const answerEntropy = answerPatternEntropy(input.answerPattern)
-  const straightLining = isStraightLining(
-    input.answerPattern,
-    STRAIGHT_LINE_ENTROPY_FLOOR
-  )
-
-  // Score against PRIOR frozen mean so the current sample does not contaminate itself.
-  // Mean only refreshes every MEAN_UPDATE_EVERY clean responses.
-  const baselineProgress = prior.windowTimes.length
-  if (prior.sampleCount < MIN_SAMPLES) {
-    reasons.push(
-      `Building baseline (${baselineProgress}/${MIN_SAMPLES} samples) — mean updates every ${MEAN_UPDATE_EVERY} responses.`
-    )
-    return finalize({
-      status: "insufficient_data",
-      zScore: null,
-      reasons,
-      trustScore: 55,
-      absoluteTimeFloor,
-      answerEntropy,
-      straightLining,
-      signalZScores: {},
-      shouldUpdateStats: true,
-      nextStats,
-      completionTimeSeconds,
-    })
-  }
-
+  // Score against PRIOR frozen mean (mean refreshes every MEAN_UPDATE_EVERY).
   const zScore = computeZScore(
     completionTimeSeconds,
     prior,
@@ -163,31 +198,37 @@ export function scoreSubmission(
 
   let status: FraudStatus = "normal"
 
-  // Lower-tail fraud: BOTH z low AND under absolute floor
-  if (belowRejectZ && belowAbsoluteFloor) {
+  // USP: negative z-score ⇒ fake (faster than peer mean)
+  if (belowRejectZ) {
     status = "rejected"
     reasons.push(
-      `Rejected: z=${zScore!.toFixed(2)} < ${Z_THRESHOLD_REJECT} and time ${completionTimeSeconds.toFixed(1)}s < floor ${absoluteTimeFloor.toFixed(1)}s.`
+      `Rejected by z-score: z=${zScore!.toFixed(2)} < ${Z_THRESHOLD_REJECT} (much faster than peer mean ${prior.runningMean.toFixed(1)}s).`
     )
-  } else if (belowFlagZ && belowAbsoluteFloor) {
+  } else if (belowFlagZ) {
     status = "flagged"
     reasons.push(
-      `Flagged: z=${zScore!.toFixed(2)} < ${Z_THRESHOLD_LOW} and time ${completionTimeSeconds.toFixed(1)}s < floor ${absoluteTimeFloor.toFixed(1)}s.`
-    )
-  } else if (zScore != null && belowFlagZ && !belowAbsoluteFloor) {
-    reasons.push(
-      `Fast relative to peers (z=${zScore.toFixed(2)}) but above absolute floor ${absoluteTimeFloor.toFixed(1)}s — treated as normal.`
+      `Flagged fake by z-score: z=${zScore!.toFixed(2)} < ${Z_THRESHOLD_LOW} (faster than peer mean ${prior.runningMean.toFixed(1)}s).`
     )
   }
 
-  // Secondary: straight-lining boosts confidence when already time-flagged
+  // Absolute floor / straight-lining only reinforce an existing negative-z flag
+  if (belowAbsoluteFloor && (status === "flagged" || status === "rejected")) {
+    reasons.push(
+      `Also under absolute floor ${absoluteTimeFloor.toFixed(1)}s.`
+    )
+    if (status === "flagged") {
+      status = "rejected"
+      reasons.push("Upgraded to rejected: negative z-score + under absolute floor.")
+    }
+  }
+
   if (straightLining && (status === "flagged" || status === "rejected")) {
     reasons.push(
       `Straight-lining detected (answer entropy ${answerEntropy.toFixed(2)}).`
     )
     if (status === "flagged") {
       status = "rejected"
-      reasons.push("Upgraded to rejected due to time + straight-lining.")
+      reasons.push("Upgraded to rejected due to negative z-score + straight-lining.")
     }
   } else if (straightLining) {
     reasons.push(
