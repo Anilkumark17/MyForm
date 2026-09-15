@@ -217,3 +217,19 @@
     animation: none;
   }
 }
+
+.react-flow {
+  --xy-node-border-radius: var(--radius-lg);
+}
+
+.react-flow__handle {
+  z-index: 12;
+}
+
+.react-flow__controls,
+.react-flow__minimap {
+  border: 1px solid var(--border);
+  box-shadow: none;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}

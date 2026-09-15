@@ -14,6 +14,9 @@ import type {
 } from "@/lib/survey/comparison"
 import {
   createComparisonOption,
+  isDraftOptionId,
+  labeledAnswerOptions,
+  optionRowsForEditor,
   type AnswerOption,
   type SurveyQuestion,
 } from "@/lib/survey/questions"
@@ -47,17 +50,31 @@ export function ComparisonOptionEditor({
   }
 
   function addOption() {
-    const nextIndex = question.options.length
+    const labeled = labeledAnswerOptions(question.options)
+    const nextIndex = labeled.length
     const label = `Option ${String.fromCharCode(65 + Math.min(nextIndex, 25))}`
-    onOptionsChange([
-      ...question.options,
-      createComparisonOption(label, "image_text"),
-    ])
+    onOptionsChange([...labeled, createComparisonOption(label, "image_text")])
   }
 
   function removeOption(optionId: string) {
-    if (question.options.length <= 2) return
-    onOptionsChange(question.options.filter((o) => o.id !== optionId))
+    const labeled = labeledAnswerOptions(question.options)
+    if (labeled.length <= 2) return
+    onOptionsChange(question.options.filter((option) => option.id !== optionId))
+  }
+
+  function updateTitle(optionId: string, title: string, index: number) {
+    if (isDraftOptionId(optionId)) {
+      if (!title.trim()) return
+      onOptionsChange([
+        ...labeledAnswerOptions(question.options),
+        { ...createComparisonOption(title), caption: title },
+      ])
+      return
+    }
+    updateOption(optionId, {
+      caption: title,
+      label: title.trim() || `Option ${index + 1}`,
+    })
   }
 
   return (
@@ -148,41 +165,45 @@ export function ComparisonOptionEditor({
           </Button>
         </div>
 
-        {question.options.map((option, index) => (
+        {optionRowsForEditor(question.options, question.id, () =>
+          createComparisonOption("")
+        ).map((option, index) => (
           <div key={option.id} className="surface space-y-3 rounded-lg p-4">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">Option {index + 1}</p>
+              <p className="text-sm font-medium">
+                {isDraftOptionId(option.id) ? "Add option" : `Option ${index + 1}`}
+              </p>
+              {isDraftOptionId(option.id) ? null : (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => removeOption(option.id)}
-                disabled={question.options.length <= 2}
+                disabled={labeledAnswerOptions(question.options).length <= 2}
                 aria-label="Remove option"
               >
                 <Trash2Icon />
               </Button>
+              )}
             </div>
 
+            {isDraftOptionId(option.id) ? null : (
             <ImageFieldInput
               id={`opt-img-${option.id}`}
               label="Image"
               value={option.imageUrl}
               onChange={(imageUrl) => updateOption(option.id, { imageUrl })}
             />
+            )}
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor={`opt-title-${option.id}`}>Title</Label>
               <Input
                 id={`opt-title-${option.id}`}
                 value={option.caption || option.label}
-                onChange={(event) => {
-                  const title = event.target.value
-                  updateOption(option.id, {
-                    caption: title,
-                    label: title.trim() || `Option ${index + 1}`,
-                  })
-                }}
+                onChange={(event) =>
+                  updateTitle(option.id, event.target.value, index)
+                }
                 placeholder="e.g. Version A — blue headline"
                 className="h-10"
               />

@@ -11,6 +11,10 @@ import {
 import { deriveFieldMetrics } from "@/lib/fraud/signals"
 import { notifyOwnerFakeFlagged } from "@/lib/notifications/fake-flagged"
 import { parseSurveyQuestions } from "@/lib/survey/questions"
+import {
+  answersForVisiblePath,
+  getVisibleQuestions,
+} from "@/lib/survey/conditional"
 import { db } from "@/lib/db"
 import {
   projects,
@@ -133,8 +137,17 @@ export async function processSubmission(
     throw new Error("Form not found.")
   }
 
-  const answers = input.answers ?? {}
-  const perFieldTimeMs = asNumberMap(input.perFieldTimeMs)
+  const questions = parseSurveyQuestions(form.questions)
+  const answers = answersForVisiblePath(questions, input.answers ?? {})
+  const visibleQuestions = getVisibleQuestions(questions, answers).filter(
+    (question) => question.type !== "hidden"
+  )
+  const visibleIds = new Set(visibleQuestions.map((question) => question.id))
+  const perFieldTimeMs = Object.fromEntries(
+    Object.entries(asNumberMap(input.perFieldTimeMs)).filter(([key]) =>
+      visibleIds.has(key)
+    )
+  )
   const { perFieldTextLength, perFieldEntropyScore } =
     deriveFieldMetrics(answers)
   const totalCompletionTimeMs = Math.max(
@@ -145,15 +158,14 @@ export async function processSubmission(
   const honeypotFieldFilled = Boolean(input.honeypotFieldFilled)
   const source = resolveSource(answers, input.source)
 
-  const questions = parseSurveyQuestions(form.questions)
   const answerPattern = Object.values(answers)
   const priorStats = welfordStateFromProject(form)
 
   const score = scoreSubmission({
     completionTimeSeconds,
     answerPattern,
-    numQuestions: questions.length,
-    wordCount: estimateSurveyWordCount(questions),
+    numQuestions: visibleQuestions.length,
+    wordCount: estimateSurveyWordCount(visibleQuestions),
     honeypotFilled: honeypotFieldFilled,
     priorStats,
   })

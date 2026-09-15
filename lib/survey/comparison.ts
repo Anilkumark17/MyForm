@@ -27,6 +27,8 @@ export const COMPARISON_OPTION_CONTENT_TYPES = [
 export type ComparisonOptionContentType =
   (typeof COMPARISON_OPTION_CONTENT_TYPES)[number]
 
+export type { ShowIfRule } from "@/lib/survey/conditional"
+
 export type ComparisonAnswer =
   | {
       mode: "single_select"
@@ -48,12 +50,6 @@ export type ComparisonAnswer =
       ratings: Record<string, number>
       sequentialReactions?: Record<string, string>
     }
-
-export type ShowIfRule = {
-  questionId: string
-  /** Option id (or branch key) that must match for this question to show */
-  equals: string
-}
 
 export function isComparisonQuestion(
   question: SurveyQuestion
@@ -247,32 +243,6 @@ export function formatComparisonAnswer(
         .map(([id, rating]) => `${labelFor(id)}: ${rating}`)
         .join(", ")
   }
-}
-
-/** Whether a question should be visible given current answers */
-export function isQuestionVisible(
-  question: SurveyQuestion,
-  answers: Record<string, unknown>,
-  allQuestions: SurveyQuestion[]
-): boolean {
-  const rule = question.config.showIf
-  if (!rule?.questionId || !rule.equals) return true
-
-  const source = allQuestions.find((q) => q.id === rule.questionId)
-  if (!source) return true
-
-  const raw = answers[rule.questionId]
-  if (isComparisonQuestion(source)) {
-    const branch = getComparisonBranchValue(raw)
-    return branch === rule.equals
-  }
-
-  if (typeof raw === "string") return raw === rule.equals
-  if (Array.isArray(raw)) return raw.map(String).includes(rule.equals)
-  if (raw && typeof raw === "object" && "selectedId" in raw) {
-    return String((raw as { selectedId: unknown }).selectedId) === rule.equals
-  }
-  return String(raw) === rule.equals
 }
 
 export function usesBeforeAfterSlider(question: SurveyQuestion): boolean {

@@ -1,9 +1,14 @@
 "use client"
 
-import { PlusIcon, Trash2Icon } from "lucide-react"
-import { useState, useTransition } from "react"
+import { GitBranchIcon, ListIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { useEffect, useEffectEvent, useRef, useState, useTransition } from "react"
 
 import { ComparisonOptionEditor } from "@/components/dashboard/comparison-option-editor"
+import {
+  BranchingOverview,
+  ConditionalLogicEditor,
+} from "@/components/dashboard/conditional-logic-editor"
+import { FlowBuilder } from "@/components/dashboard/flow-builder/flow-builder"
 import { ImageFieldInput } from "@/components/dashboard/image-field-input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -19,17 +24,27 @@ import { Textarea } from "@/components/ui/textarea"
 import { useQuestionCollab } from "@/hooks/use-question-collab"
 import { saveProjectQuestions } from "@/lib/projects/actions"
 import {
+  cleanupConditionalLogic,
+  hasShowIf,
+  questionsDependingOn,
+} from "@/lib/survey/conditional"
+import {
   questionTypesByCategory,
   QUESTION_TYPE_MAP,
   type QuestionTypeId,
 } from "@/lib/survey/question-types"
 import {
   applyTypeChange,
+  commitOptionLabel,
   createEmptyQuestion,
   createOption,
+  isDraftOptionId,
+  labeledAnswerOptions,
+  optionRowsForEditor,
   type AnswerOption,
   type SurveyQuestion,
 } from "@/lib/survey/questions"
+import { cn } from "@/lib/utils"
 
 type QuestionEditorProps = {
   projectId: string
@@ -39,31 +54,154 @@ type QuestionEditorProps = {
 
 const typeGroups = questionTypesByCategory()
 
+type SaveStatus = "idle" | "saving" | "saved" | "error"
+
 export function QuestionEditor({
   projectId,
   questions,
   onChange,
 }: QuestionEditorProps) {
+  const [view, setView] = useState<"editor" | "flow">("editor")
   const [pending, startTransition] = useTransition()
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [dirty, setDirty] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [syncNotice, setSyncNotice] = useState<string | null>(null)
+
+  const questionsRef = useRef(questions)
+  const lastSavedJsonRef = useRef(JSON.stringify(questions))
+  const fallbackTimerRef = useRef<number | null>(null)
+  const snapshotGenRef = useRef(0)
+  const connectedRef = useRef(false)
+  const collabRef = useRef<{
+    clientId: string
+    retryPersist: () => void
+    acknowledgePersist: (revision: number, next: SurveyQuestion[]) => void
+    syncing: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    questionsRef.current = questions
+  }, [questions])
+
+  function clearFallback() {
+    if (fallbackTimerRef.current != null) {
+      window.clearTimeout(fallbackTimerRef.current)
+      fallbackTimerRef.current = null
+    }
+  }
+
+  const persistSnapshot = useEffectEvent(async () => {
+    const payload = questionsRef.current
+    const serialized = JSON.stringify(payload)
+    if (serialized === lastSavedJsonRef.current) {
+      setSaveStatus("saved")
+      setSaveError(null)
+      return true
+    }
+
+    snapshotGenRef.current += 1
+    const generation = snapshotGenRef.current
+    setSaveStatus("saving")
+    setSaveError(null)
+
+    const result = await saveProjectQuestions(
+      projectId,
+      payload,
+      collabRef.current?.clientId
+    )
+    if (generation !== snapshotGenRef.current) return false
+
+    if (result.error) {
+      setSaveStatus("error")
+      setSaveError(result.error)
+      return false
+    }
+
+    lastSavedJsonRef.current = serialized
+    if (typeof result.revision === "number") {
+      collabRef.current?.acknowledgePersist(result.revision, payload)
+    }
+    setSaveStatus("saved")
+    setSaveError(null)
+    return true
+  })
 
   const collab = useQuestionCollab({
     projectId,
     questions,
-    onRemoteQuestions: (next) => {
-      setDirty(false)
-      setMessage("Synced from collaborator")
+    onRemoteQuestions: (next, meta) => {
+      lastSavedJsonRef.current = JSON.stringify(next)
+      setSaveStatus("saved")
+      setSaveError(null)
+      clearFallback()
+      if (meta?.source === "op") {
+        setSyncNotice("Synced from collaborator")
+      }
       onChange(next)
+    },
+    onPersistIdle: () => {
+      lastSavedJsonRef.current = JSON.stringify(questionsRef.current)
+      setSaveStatus("saved")
+      setSaveError(null)
+      clearFallback()
+    },
+    onPersistError: (message) => {
+      setSaveStatus("error")
+      setSaveError(message)
+      clearFallback()
+      fallbackTimerRef.current = window.setTimeout(() => {
+        fallbackTimerRef.current = null
+        void persistSnapshot()
+      }, 1200)
     },
   })
 
+  connectedRef.current = collab.connected
+  collabRef.current = {
+    clientId: collab.clientId,
+    retryPersist: collab.retryPersist,
+    acknowledgePersist: collab.acknowledgePersist,
+    syncing: collab.syncing,
+  }
+
+  useEffect(() => {
+    function flushIfNeeded() {
+      if (document.visibilityState && document.visibilityState !== "hidden") {
+        return
+      }
+      if (collabRef.current?.syncing) return
+      const current = JSON.stringify(questionsRef.current)
+      if (current === lastSavedJsonRef.current) return
+      if (connectedRef.current) {
+        collabRef.current?.retryPersist()
+        return
+      }
+      void persistSnapshot()
+    }
+
+    document.addEventListener("visibilitychange", flushIfNeeded)
+    window.addEventListener("pagehide", flushIfNeeded)
+    return () => {
+      document.removeEventListener("visibilitychange", flushIfNeeded)
+      window.removeEventListener("pagehide", flushIfNeeded)
+      clearFallback()
+    }
+  }, [])
+
   function updateQuestions(next: SurveyQuestion[]) {
-    setDirty(true)
-    setMessage(null)
+    setSaveStatus("saving")
+    setSaveError(null)
+    setSyncNotice(null)
     onChange(next)
     collab.publishLocalChange(next)
+  }
+
+  function handleRetrySave() {
+    clearFallback()
+    startTransition(async () => {
+      const saved = await persistSnapshot()
+      if (!saved) collab.retryPersist()
+    })
   }
 
   function updateQuestion(id: string, patch: Partial<SurveyQuestion>) {
@@ -76,14 +214,18 @@ export function QuestionEditor({
 
   function changeType(id: string, type: QuestionTypeId) {
     updateQuestions(
-      questions.map((question) =>
-        question.id === id ? applyTypeChange(question, type) : question
+      cleanupConditionalLogic(
+        questions.map((question) =>
+          question.id === id ? applyTypeChange(question, type) : question
+        )
       )
     )
   }
 
   function removeQuestion(id: string) {
-    updateQuestions(questions.filter((question) => question.id !== id))
+    updateQuestions(
+      cleanupConditionalLogic(questions.filter((question) => question.id !== id))
+    )
   }
 
   function addQuestion() {
@@ -100,9 +242,7 @@ export function QuestionEditor({
         if (question.id !== questionId) return question
         return {
           ...question,
-          options: question.options.map((option) =>
-            option.id === optionId ? { ...option, label } : option
-          ),
+          options: commitOptionLabel(question.options, optionId, label),
         }
       })
     )
@@ -110,13 +250,15 @@ export function QuestionEditor({
 
   function removeOption(questionId: string, optionId: string) {
     updateQuestions(
-      questions.map((question) => {
-        if (question.id !== questionId) return question
-        return {
-          ...question,
-          options: question.options.filter((option) => option.id !== optionId),
-        }
-      })
+      cleanupConditionalLogic(
+        questions.map((question) => {
+          if (question.id !== questionId) return question
+          return {
+            ...question,
+            options: question.options.filter((option) => option.id !== optionId),
+          }
+        })
+      )
     )
   }
 
@@ -124,11 +266,12 @@ export function QuestionEditor({
     updateQuestions(
       questions.map((question) => {
         if (question.id !== questionId) return question
+        const labeled = labeledAnswerOptions(question.options)
         return {
           ...question,
           options: [
-            ...question.options,
-            createOption(`Option ${question.options.length + 1}`),
+            ...labeled,
+            createOption(`Option ${labeled.length + 1}`),
           ],
         }
       })
@@ -177,40 +320,46 @@ export function QuestionEditor({
     )
   }
 
-  function handleSave() {
-    setError(null)
-    startTransition(async () => {
-      const result = await saveProjectQuestions(projectId, questions)
-      if (result.error) {
-        setError(result.error)
-        return
-      }
-      setDirty(false)
-      setMessage("Questions saved.")
-    })
-  }
-
-  if (questions.length === 0) {
+  if (questions.length === 0 && view === "editor") {
     return (
-      <div className="surface rounded-lg border-dashed px-6 py-12 text-center">
-        <p className="text-sm text-muted-foreground">
-          No questions yet. Generate a set or add one manually.
-        </p>
-        <Button type="button" className="mt-4 h-9" onClick={addQuestion}>
-          Add question
-        </Button>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <AutosaveStatus
+            status={saveStatus}
+            error={saveError}
+            pending={pending}
+            onRetry={handleRetrySave}
+          />
+          <ViewToggle view={view} onChange={setView} />
+        </div>
+        <div className="surface rounded-lg border-dashed px-6 py-12 text-center">
+          <p className="text-sm text-muted-foreground">
+            No questions yet. Generate a set, add one here, or switch to Flow
+            Builder to map branches visually.
+          </p>
+          <Button type="button" className="mt-4 h-9" onClick={addQuestion}>
+            Add question
+          </Button>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge variant={collab.connected ? "secondary" : "outline"}>
           {collab.connected ? "Live sync on" : "Connecting…"}
         </Badge>
         <span>rev {collab.revision}</span>
-        {collab.syncing ? <span>Syncing…</span> : null}
+        <AutosaveStatus
+          status={saveStatus}
+          error={saveError}
+          pending={pending || collab.syncing}
+          onRetry={handleRetrySave}
+        />
+        {syncNotice ? <span>{syncNotice}</span> : null}
         {collab.peers.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5">
             {collab.peers.map((peer) => (
@@ -229,19 +378,41 @@ export function QuestionEditor({
         ) : (
           <span>Only you editing</span>
         )}
+        </div>
+        <ViewToggle view={view} onChange={setView} />
       </div>
+
+      {view === "flow" ? (
+        <FlowBuilder questions={questions} onChange={updateQuestions} />
+      ) : (
+        <>
+      <BranchingOverview questions={questions} />
 
       {questions.map((question, index) => {
         const meta = QUESTION_TYPE_MAP[question.type]
+        const branchedFrom = hasShowIf(question)
+        const branchesOthers =
+          questionsDependingOn(questions, question.id).length > 0
         return (
           <div
             key={question.id}
             className="surface rounded-lg p-4"
           >
             <div className="mb-3 flex items-start justify-between gap-3">
-              <p className="text-xs font-medium text-muted-foreground">
-                Question {index + 1}
-              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Question {index + 1}
+                </p>
+                {question.config.groupName ? (
+                  <Badge variant="outline">{question.config.groupName}</Badge>
+                ) : null}
+                {branchedFrom ? (
+                  <Badge variant="secondary">Conditional</Badge>
+                ) : null}
+                {branchesOthers ? (
+                  <Badge variant="outline">Branches</Badge>
+                ) : null}
+              </div>
               <Button
                 type="button"
                 variant="ghost"
@@ -318,7 +489,8 @@ export function QuestionEditor({
                     </Button>
                   </div>
                   <div className="space-y-2">
-                    {question.options.map((option, optionIndex) => (
+                    {optionRowsForEditor(question.options, question.id).map(
+                      (option, optionIndex) => (
                       <div
                         key={option.id}
                         className={
@@ -337,8 +509,13 @@ export function QuestionEditor({
                                 event.target.value
                               )
                             }
-                            placeholder={`Option ${optionIndex + 1}`}
+                            placeholder={
+                              isDraftOptionId(option.id)
+                                ? "Add option"
+                                : `Option ${optionIndex + 1}`
+                            }
                           />
+                          {isDraftOptionId(option.id) ? null : (
                           <Button
                             type="button"
                             variant="ghost"
@@ -347,10 +524,13 @@ export function QuestionEditor({
                               removeOption(question.id, option.id)
                             }
                             aria-label="Delete option"
-                            disabled={question.options.length <= 1}
+                            disabled={
+                              labeledAnswerOptions(question.options).length <= 1
+                            }
                           >
                             <Trash2Icon />
                           </Button>
+                          )}
                         </div>
                         {question.type === "image_choice" ? (
                           <ImageFieldInput
@@ -359,18 +539,26 @@ export function QuestionEditor({
                             value={option.imageUrl}
                             onChange={(imageUrl) =>
                               updateQuestions(
-                                questions.map((q) =>
-                                  q.id !== question.id
-                                    ? q
-                                    : {
-                                        ...q,
-                                        options: q.options.map((o) =>
-                                          o.id === option.id
-                                            ? { ...o, imageUrl }
-                                            : o
-                                        ),
-                                      }
-                                )
+                                questions.map((q) => {
+                                  if (q.id !== question.id) return q
+                                  if (isDraftOptionId(option.id)) {
+                                    return {
+                                      ...q,
+                                      options: [
+                                        ...labeledAnswerOptions(q.options),
+                                        { ...createOption(""), imageUrl },
+                                      ],
+                                    }
+                                  }
+                                  return {
+                                    ...q,
+                                    options: q.options.map((o) =>
+                                      o.id === option.id
+                                        ? { ...o, imageUrl }
+                                        : o
+                                    ),
+                                  }
+                                })
                               )
                             }
                           />
@@ -536,38 +724,115 @@ export function QuestionEditor({
                   ) : null}
                 </div>
               ) : null}
+
+              <ConditionalLogicEditor
+                question={question}
+                questions={questions}
+                onQuestionChange={(patch) =>
+                  updateQuestion(question.id, patch)
+                }
+                onQuestionsChange={updateQuestions}
+              />
             </div>
           </div>
         )
       })}
+        </>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
+        {view === "editor" ? (
         <Button type="button" variant="outline" onClick={addQuestion}>
           <PlusIcon data-icon="inline-start" />
           Add question
         </Button>
-        <Button
-          type="button"
-          onClick={handleSave}
-          disabled={pending || !dirty}
-        >
-          {pending ? "Saving…" : "Save questions"}
-        </Button>
-        {dirty ? (
-          <span className="text-xs text-muted-foreground">Unsaved changes</span>
         ) : null}
       </div>
 
-      {error ? (
+      {saveError ? (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{saveError}</AlertDescription>
         </Alert>
       ) : null}
-      {message ? (
-        <Alert>
-          <AlertDescription>{message}</AlertDescription>
-        </Alert>
+    </div>
+  )
+}
+
+function AutosaveStatus({
+  status,
+  error,
+  pending,
+  onRetry,
+}: {
+  status: SaveStatus
+  error: string | null
+  pending: boolean
+  onRetry: () => void
+}) {
+  const saving = status === "saving" || pending
+  const label = saving
+    ? "Saving…"
+    : status === "saved"
+      ? "Saved"
+      : status === "error"
+        ? error ?? "Could not save"
+        : "Autosave on"
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span
+        className={cn(
+          "text-xs",
+          status === "error" ? "text-destructive" : "text-muted-foreground"
+        )}
+      >
+        {label}
+      </span>
+      {status === "error" ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7"
+          onClick={onRetry}
+          disabled={saving}
+        >
+          Retry save
+        </Button>
       ) : null}
+    </div>
+  )
+}
+
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: "editor" | "flow"
+  onChange: (view: "editor" | "flow") => void
+}) {
+  return (
+    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+      <Button
+        type="button"
+        size="sm"
+        variant={view === "editor" ? "secondary" : "ghost"}
+        className={cn("h-7 gap-1.5", view === "editor" && "shadow-sm")}
+        onClick={() => onChange("editor")}
+      >
+        <ListIcon data-icon="inline-start" />
+        Form Editor
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant={view === "flow" ? "secondary" : "ghost"}
+        className={cn("h-7 gap-1.5", view === "flow" && "shadow-sm")}
+        onClick={() => onChange("flow")}
+      >
+        <GitBranchIcon data-icon="inline-start" />
+        Flow Builder
+      </Button>
     </div>
   )
 }

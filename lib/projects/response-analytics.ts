@@ -1,4 +1,5 @@
 import type { Submission } from "@/lib/db/schema"
+import { isQuestionVisible } from "@/lib/survey/conditional"
 import { QUESTION_TYPE_MAP, type QuestionTypeId } from "@/lib/survey/question-types"
 import type { SurveyQuestion } from "@/lib/survey/questions"
 
@@ -53,6 +54,16 @@ export function formatAnswerValue(value: unknown): string {
   }
   const text = String(value).trim()
   return text.length ? text : "—"
+}
+
+export function formatAnswerCell(
+  question: SurveyQuestion,
+  answers: Record<string, unknown> | null | undefined,
+  allQuestions: SurveyQuestion[]
+): string {
+  const record = answers ?? {}
+  if (!isQuestionVisible(question, record, allQuestions)) return "Skipped"
+  return formatAnswerValue(record[question.id])
 }
 
 function flattenAnswerTokens(value: unknown): string[] {
@@ -138,7 +149,10 @@ export function buildQuestionAggregates(
 ): QuestionAggregate[] {
   return questions.map((question) => {
     const kind = detectKind(question.type)
-    const values = submissions.map((row) => row.answers?.[question.id])
+    const applicable = submissions.filter((row) =>
+      isQuestionVisible(question, row.answers ?? {}, questions)
+    )
+    const values = applicable.map((row) => row.answers?.[question.id])
     const nonEmpty = values.filter((value) => !isEmpty(value))
     const responseCount = nonEmpty.length
     const emptyCount = values.length - responseCount
@@ -147,7 +161,7 @@ export function buildQuestionAggregates(
     const textMap = new Map<string, { count: number; submissionIds: string[] }>()
     const numbers: number[] = []
 
-    submissions.forEach((row) => {
+    applicable.forEach((row) => {
       const value = row.answers?.[question.id]
       if (isEmpty(value)) return
 

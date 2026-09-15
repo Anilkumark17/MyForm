@@ -21,8 +21,11 @@ import {
 } from "@/lib/forms/embed-theme"
 import {
   isComparisonAnswerComplete,
-  isQuestionVisible,
 } from "@/lib/survey/comparison"
+import {
+  answersForVisiblePath,
+  getVisibleQuestions,
+} from "@/lib/survey/conditional"
 import type { SurveyQuestion } from "@/lib/survey/questions"
 import { cn } from "@/lib/utils"
 
@@ -105,9 +108,7 @@ export function PublicForm({
     })
   }
 
-  const visibleQuestions = questions.filter((question) =>
-    isQuestionVisible(question, answers, questions)
-  )
+  const visibleQuestions = getVisibleQuestions(questions, answers)
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -137,7 +138,7 @@ export function PublicForm({
         params?.get("campaign") ||
         null
 
-      const mergedAnswers = { ...answers }
+      const mergedAnswers = answersForVisiblePath(questions, { ...answers })
       if (source && !mergedAnswers.utm_source) {
         mergedAnswers.utm_source = source
       }
@@ -271,10 +272,13 @@ export function PublicForm({
         />
       </div>
 
-      <div className="space-y-5">
-        {visibleQuestions.map((question) => (
+      <div className="space-y-5" aria-live="polite">
+        {visibleQuestions.map((question, index) => (
           <div key={question.id} className="space-y-2">
             <Label htmlFor={question.id} className="text-[15px] leading-snug">
+              <span className="mr-1.5 text-xs font-medium opacity-55">
+                {index + 1}.
+              </span>
               {question.prompt}
             </Label>
             <FieldInput

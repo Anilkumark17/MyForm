@@ -18,7 +18,12 @@ type UseQuestionCollabArgs = {
   projectId: string
   enabled?: boolean
   questions: SurveyQuestion[]
-  onRemoteQuestions: (questions: SurveyQuestion[]) => void
+  onRemoteQuestions: (
+    questions: SurveyQuestion[],
+    meta?: { source: "snapshot" | "op" }
+  ) => void
+  onPersistIdle?: () => void
+  onPersistError?: (message: string) => void
 }
 
 export function useQuestionCollab({
@@ -26,6 +31,8 @@ export function useQuestionCollab({
   enabled = true,
   questions,
   onRemoteQuestions,
+  onPersistIdle,
+  onPersistError,
 }: UseQuestionCollabArgs) {
   const [revision, setRevision] = useState(0)
   const [peers, setPeers] = useState<CollabPeer[]>([])
@@ -35,8 +42,20 @@ export function useQuestionCollab({
   const clientIdRef = useRef(makeClientId())
   const revisionRef = useRef(0)
   const questionsRef = useRef(questions)
+  const ackedRef = useRef(questions)
   const applyingRemoteRef = useRef(false)
   const queueRef = useRef<Promise<void>>(Promise.resolve())
+  const inflightRef = useRef(0)
+  const persistFailedRef = useRef(false)
+  const lastErrorRef = useRef("Could not save questions.")
+
+  const notifyIdle = useEffectEvent(() => {
+    onPersistIdle?.()
+  })
+
+  const notifyError = useEffectEvent((message: string) => {
+    onPersistError?.(message)
+  })
 
   useEffect(() => {
     questionsRef.current = questions
@@ -47,8 +66,10 @@ export function useQuestionCollab({
       revisionRef.current = message.revision
       setRevision(message.revision)
       setPeers(message.peers)
+      questionsRef.current = message.questions
+      ackedRef.current = message.questions
       applyingRemoteRef.current = true
-      onRemoteQuestions(message.questions)
+      onRemoteQuestions(message.questions, { source: "snapshot" })
       queueMicrotask(() => {
         applyingRemoteRef.current = false
       })
@@ -70,7 +91,9 @@ export function useQuestionCollab({
       setRevision(message.revision)
       applyingRemoteRef.current = true
       const next = applyQuestionOp(questionsRef.current, message.op)
-      onRemoteQuestions(next)
+      questionsRef.current = next
+      ackedRef.current = next
+      onRemoteQuestions(next, { source: "op" })
       queueMicrotask(() => {
         applyingRemoteRef.current = false
       })
@@ -104,30 +127,60 @@ export function useQuestionCollab({
 
   async function submitOps(ops: QuestionOp[]) {
     for (const op of ops) {
-      setSyncing(true)
+      const response = await fetch(`/api/collab/${projectId}/ops`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: clientIdRef.current,
+          baseRevision: revisionRef.current,
+          op,
+        }),
+      })
+      let data: { ok?: boolean; revision?: number; error?: string } = {}
       try {
-        const response = await fetch(`/api/collab/${projectId}/ops`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientId: clientIdRef.current,
-            baseRevision: revisionRef.current,
-            op,
-          }),
-        })
-        const data = (await response.json()) as {
-          ok?: boolean
-          revision?: number
-          error?: string
-        }
-        if (response.ok && typeof data.revision === "number") {
-          revisionRef.current = data.revision
-          setRevision(data.revision)
-        }
-      } finally {
-        setSyncing(false)
+        data = (await response.json()) as typeof data
+      } catch {
+        data = {}
+      }
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not save questions.")
+      }
+      if (typeof data.revision === "number") {
+        revisionRef.current = data.revision
+        setRevision(data.revision)
       }
     }
+  }
+
+  function finishBatch() {
+    inflightRef.current = Math.max(0, inflightRef.current - 1)
+    if (inflightRef.current > 0) return
+    setSyncing(false)
+    if (persistFailedRef.current) {
+      persistFailedRef.current = false
+      notifyError(lastErrorRef.current)
+      return
+    }
+    ackedRef.current = questionsRef.current
+    notifyIdle()
+  }
+
+  function enqueueOps(ops: QuestionOp[]) {
+    if (!enabled || ops.length === 0) return
+    inflightRef.current += 1
+    setSyncing(true)
+    queueRef.current = queueRef.current.then(async () => {
+      try {
+        await submitOps(ops)
+        persistFailedRef.current = false
+      } catch (error) {
+        persistFailedRef.current = true
+        lastErrorRef.current =
+          error instanceof Error ? error.message : "Could not save questions."
+      } finally {
+        finishBatch()
+      }
+    })
   }
 
   function publishLocalChange(next: SurveyQuestion[]) {
@@ -138,10 +191,17 @@ export function useQuestionCollab({
 
     const prev = questionsRef.current
     questionsRef.current = next
-    const ops = diffQuestions(prev, next)
-    if (ops.length === 0) return
+    enqueueOps(diffQuestions(prev, next))
+  }
 
-    queueRef.current = queueRef.current.then(() => submitOps(ops))
+  function retryPersist() {
+    enqueueOps(diffQuestions(ackedRef.current, questionsRef.current))
+  }
+
+  function acknowledgePersist(nextRevision: number, next: SurveyQuestion[]) {
+    revisionRef.current = nextRevision
+    setRevision(nextRevision)
+    ackedRef.current = next
   }
 
   return {
@@ -151,5 +211,7 @@ export function useQuestionCollab({
     connected,
     syncing,
     publishLocalChange,
+    retryPersist,
+    acknowledgePersist,
   }
 }

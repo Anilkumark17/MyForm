@@ -5,7 +5,7 @@ import { PublicForm } from "@/components/public/public-form"
 import { db } from "@/lib/db"
 import { projects } from "@/lib/db/schema"
 import { parseEmbedTheme } from "@/lib/forms/embed-theme"
-import { parseSurveyQuestions } from "@/lib/survey/questions"
+import { forPublicForm, parseSurveyQuestions } from "@/lib/survey/questions"
 
 type FormPageProps = {
   params: Promise<{ formId: string }>
@@ -34,9 +34,7 @@ export default async function PublicFormPage({
     notFound()
   }
 
-  const questions = parseSurveyQuestions(form.questions).filter(
-    (question) => question.type !== "hidden"
-  )
+  const questions = forPublicForm(parseSurveyQuestions(form.questions))
 
   if (questions.length === 0) {
     return (

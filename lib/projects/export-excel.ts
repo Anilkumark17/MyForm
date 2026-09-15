@@ -2,7 +2,7 @@ import * as XLSX from "xlsx"
 
 import type { Submission } from "@/lib/db/schema"
 import { formatComparisonForList } from "@/lib/projects/comparison-analytics"
-import { formatAnswerValue } from "@/lib/projects/response-analytics"
+import { formatAnswerCell } from "@/lib/projects/response-analytics"
 import { isFakeSubmission } from "@/lib/projects/submission-filters"
 import type { SurveyQuestion } from "@/lib/survey/questions"
 
@@ -24,11 +24,13 @@ function rowFromSubmission(
 
   for (const question of questions) {
     const key = question.prompt.slice(0, 80) || question.id
-    const raw = submission.answers?.[question.id]
-    row[key] =
-      question.type === "comparison_choice"
-        ? formatComparisonForList(question, raw)
-        : formatAnswerValue(raw)
+    const skipped =
+      formatAnswerCell(question, submission.answers, questions) === "Skipped"
+    row[key] = skipped
+      ? "Skipped"
+      : question.type === "comparison_choice"
+        ? formatComparisonForList(question, submission.answers?.[question.id])
+        : formatAnswerCell(question, submission.answers, questions)
   }
 
   return row

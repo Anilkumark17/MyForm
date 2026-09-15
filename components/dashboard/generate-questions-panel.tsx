@@ -113,7 +113,8 @@ export function GenerateQuestionsPanel({
             Survey questions
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Generate Mom Test questions, then edit wording, types, and options.
+            Generate Mom Test questions, then map branches in Flow Builder or
+            edit the list.
           </p>
           <p className="mt-1.5 text-xs text-muted-foreground">
             {generationsUnlimited

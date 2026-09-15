@@ -250,7 +250,8 @@ export async function generateProjectQuestions(
 
 export async function saveProjectQuestions(
   projectId: string,
-  questionsInput: unknown
+  questionsInput: unknown,
+  clientId?: string
 ): Promise<SaveQuestionsState> {
   const user = await requireUser()
   if (!user) {
@@ -269,17 +270,12 @@ export async function saveProjectQuestions(
   const questions = questionsInput
     .map((item) => normalizeSurveyQuestion(item))
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
-    .map((item) => ({
-      ...item,
-      prompt: item.prompt.trim(),
-    }))
-    .filter((item) => item.prompt.length > 0)
 
   const accepted = await acceptQuestionOp({
     projectId: project.id,
     userId: user.id,
     userName: user.name,
-    clientId: `save-${user.id}`,
+    clientId: clientId || `save-${user.id}`,
     baseRevision: project.questionsRevision ?? 0,
     op: { type: "replace_all", questions },
   })
@@ -289,5 +285,5 @@ export async function saveProjectQuestions(
   }
 
   revalidatePath(`/dashboard/projects/${project.id}`)
-  return { ok: true }
+  return { ok: true, revision: accepted.revision }
 }

@@ -10,12 +10,17 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "test": "tsx --test lib/fraud/__tests__/**/*.test.ts"
+    "test": "tsx --test \"lib/fraud/__tests__/**/*.test.ts\" \"lib/collab/__tests__/**/*.test.ts\" \"lib/survey/__tests__/**/*.test.ts\"",
+    "test:fraud": "tsx --test \"lib/fraud/__tests__/**/*.test.ts\"",
+    "test:fraud-accuracy": "tsx lib/fraud/fraud-accuracy.report.ts",
+    "test:ot": "tsx --test \"lib/collab/__tests__/**/*.test.ts\""
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
+    "@dagrejs/dagre": "^3.1.1",
     "@neondatabase/serverless": "^1.1.0",
     "@shadcn/react": "^0.2.1",
+    "@xyflow/react": "^12.11.6",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

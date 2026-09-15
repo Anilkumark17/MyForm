@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/table"
 import type { Submission } from "@/lib/db/schema"
 import { formatComparisonForList } from "@/lib/projects/comparison-analytics"
-import { formatAnswerValue } from "@/lib/projects/response-analytics"
+import { formatAnswerCell } from "@/lib/projects/response-analytics"
 import type { SurveyQuestion } from "@/lib/survey/questions"
 
 type SubmissionsTableProps = {
@@ -86,27 +86,39 @@ export function SubmissionsTable({
               <TableCell className="tabular-nums">
                 {submission.trustScore}
               </TableCell>
-              {questions.map((question) => (
-                <TableCell
-                  key={question.id}
-                  className="max-w-[220px] truncate text-xs"
-                  title={
-                    question.type === "comparison_choice"
-                      ? formatComparisonForList(
-                          question,
-                          submission.answers?.[question.id]
-                        )
-                      : formatAnswerValue(submission.answers?.[question.id])
-                  }
-                >
-                  {question.type === "comparison_choice"
+              {questions.map((question) => {
+                const skipped =
+                  formatAnswerCell(
+                    question,
+                    submission.answers,
+                    questions
+                  ) === "Skipped"
+                const cell = skipped
+                  ? "Skipped"
+                  : question.type === "comparison_choice"
                     ? formatComparisonForList(
                         question,
                         submission.answers?.[question.id]
                       )
-                    : formatAnswerValue(submission.answers?.[question.id])}
+                    : formatAnswerCell(
+                        question,
+                        submission.answers,
+                        questions
+                      )
+                return (
+                <TableCell
+                  key={question.id}
+                  className="max-w-[220px] truncate text-xs"
+                  title={cell}
+                >
+                  {skipped ? (
+                    <span className="text-muted-foreground">Skipped</span>
+                  ) : (
+                    cell
+                  )}
                 </TableCell>
-              ))}
+                )
+              })}
             </TableRow>
           ))}
         </TableBody>

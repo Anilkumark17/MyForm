@@ -15,4 +15,5 @@ export type GenerateQuestionsState = {
 export type SaveQuestionsState = {
   error?: string
   ok?: boolean
+  revision?: number
 }

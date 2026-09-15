@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 
 import { db } from "@/lib/db"
 import { projects } from "@/lib/db/schema"
-import { parseSurveyQuestions } from "@/lib/survey/questions"
+import { forPublicForm, parseSurveyQuestions } from "@/lib/survey/questions"
 
 type RouteContext = {
   params: Promise<{ formId: string }>
@@ -26,9 +26,7 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Form not found." }, { status: 404 })
   }
 
-  const questions = parseSurveyQuestions(form.questions).filter(
-    (question) => question.type !== "hidden"
-  )
+  const questions = forPublicForm(parseSurveyQuestions(form.questions))
 
   return NextResponse.json({
     id: form.id,

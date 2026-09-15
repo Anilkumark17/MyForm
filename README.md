@@ -17,12 +17,11 @@ Create a project → generate interview questions from ICP + research objective 
 7. [Getting started](#getting-started)
 8. [Environment variables](#environment-variables)
 9. [Scripts & migrations](#scripts--migrations)
-10. [Routes](#routes)
-11. [Testing](#testing)
-12. [Further reading](#further-reading)
+10.[Routes](#routes)
+11.[Testing](#testing)
+12.[Further reading](#further-reading)
 
 ---
-
 ## Product overview
 
 | Persona | Job to be done |
@@ -32,7 +31,6 @@ Create a project → generate interview questions from ICP + research objective 
 | Ops / research | Trust analytics after bots and speed-runners are filtered |
 
 **Core loop**
-
 ```
 Project (ICP + objectives)
   → AI Mom Test questions (or manual editor)
@@ -135,6 +133,8 @@ Flagged / rejected submissions are **excluded** from charts, the primary table, 
 - Generate 6–8 Mom Test questions from ICP / objectives
 - Full survey type catalog (text, choice, scales, date, currency, comparison-choice, …)
 - Manual edit, regenerate, save
+- Form Editor + visual Flow Builder (React Flow) for option-level branching
+- Conditional / branching logic: show a different follow-up set based on each answer (including nested branches)
 - Comparison-choice option media + analytics
 
 ### Public / embed forms
@@ -142,6 +142,7 @@ Flagged / rejected submissions are **excluded** from charts, the primary table, 
 - Silent client timing + honeypot (respondents never see scores)
 - Optional UTM / source capture
 - Local draft resume (`localStorage`)
+- Adaptive questions: only the matching branch is shown; skipped paths are not stored
 - Themeable embed (light/dark/transparent, colors, compact, hide chrome)
 
 ### Responses & analytics
@@ -205,7 +206,7 @@ lib/
   collab/                  OT transform / apply / hub
   fraud/                   Welford, scoring, process
   projects/                Actions, queries, export, invites
-  survey/                  Question types + normalization
+  survey/                  Question types, normalization, flow graph, conditional branching
   forms/                   Embed theme, drafts
   db/                      Drizzle schema + client
 
@@ -292,6 +293,8 @@ See `.env.example`.
 | `npm run dev` | Next dev server |
 | `npm run build` / `start` | Production |
 | `npm run lint` | ESLint |
+| `npm test` | Fraud + OT + conditional logic unit tests |
+| `npm run test:fraud-accuracy` | Print fraud confusion matrix + % metrics |
 | `npm run db:generate` | Drizzle generate |
 | `npm run db:push` | Push schema |
 | `npm run db:studio` | Drizzle Studio |
@@ -343,15 +346,67 @@ Run with `node` (loads `.env` via `dotenv`):
 
 ## Testing
 
-```bash
-npm test
-# fraud scoring + Welford
+### Commands
 
-npx tsx --test lib/collab/__tests__/ot.test.ts
-# OT transform convergence
+```bash
+npm test                 # fraud unit + OT unit + conditional logic tests
+npm run test:fraud       # fraud suite only
+npm run test:fraud-accuracy   # print confusion matrix + % metrics
+npm run test:ot          # OT transform convergence
 ```
 
-Manual QA checklist:
+### What we test
+
+| Suite | Coverage |
+|-------|----------|
+| **Welford unit** | Online mean/variance matches batch formula; std floor; mean frozen between 15-sample refreshes |
+| **Scorer unit** | Baseline unlabeled for first 15; honeypot/instant reject; negative-z flags after baseline; legit ≥ mean stays `normal` |
+| **Accuracy eval** | Labeled post-baseline corpus (legit vs fake) → confusion matrix, accuracy, precision, recall, F1 |
+| **Hard bots** | Honeypot + &lt;1.5s → 100% reject before and after baseline |
+| **OT collab** | Concurrent insert transform; dual-client convergence |
+| **Conditional logic** | Branch show/hide, nested ancestors, skipped-path answer pruning |
+
+Harness: `lib/fraud/eval-harness.ts` · report: `npm run test:fraud-accuracy`.
+
+### Fraud detection accuracy (measured)
+
+Evaluation setup (synthetic, deterministic):
+
+1. Build a clean peer baseline (~60s completions, `MIN_SAMPLES + 5`).
+2. Score **22 labeled cases** after baseline is ready:
+   - **10 legit** — at/above peer mean (careful / slow readers).
+   - **12 fake** — below mean speed-runs, honeypot, instant bot, straight-line + fast.
+3. Prediction rule: `flagged` \| `rejected` ⇒ fake; `normal` ⇒ legit.
+
+**Latest run (`npm run test:fraud-accuracy`):**
+
+| Metric | Result |
+|--------|--------|
+| Cases | 22 |
+| True positive (fake caught) | 12 |
+| True negative (legit kept) | 10 |
+| False positive | 0 |
+| False negative | 0 |
+| **Accuracy** | **100.0%** |
+| **Precision** | **100.0%** |
+| **Recall** | **100.0%** |
+| **F1** | **100.0%** |
+
+Additional policy checks (also automated):
+
+| Check | Result |
+|-------|--------|
+| First 15 clean samples never z-labeled fake | **100%** (all `insufficient_data`) |
+| Honeypot / instant bot reject (pre + post baseline) | **100%** |
+| Full automated suite (`npm test`) | **16+ fraud tests + 2 OT tests passing** |
+
+### How to read these numbers
+
+- This is **offline labeled-corpus accuracy** against the product’s own decision rule (z &lt; 0 after baseline, plus hard bot gates). It is not a claim about every real-world survey population.
+- Legit cases are defined as **≥ peer mean** duration; borderline “slightly fast humans” near the mean will be flagged by design (USP: negative z = fake). Tune `Z_THRESHOLD_LOW` in `lib/fraud/constants.ts` if you need a softer cut.
+- Re-run after scorer changes: `npm run test:fraud-accuracy` and update this table if metrics move.
+
+### Manual QA checklist
 
 1. Generate questions for a real ICP/objective — score against Mom Test bar (`lib/ai/README.md`).
 2. Submit &lt;15 responses — none labeled fake (except honeypot / instant bot).
@@ -367,6 +422,7 @@ Manual QA checklist:
 - Mom Test methodology: Rob Fitzpatrick, *The Mom Test*
 - Welford’s online algorithm: standard running mean / M2 formulation in `lib/fraud/welford.ts`
 - OT overview: transform concurrent ops so replicas converge without last-write-wins
+- Fraud eval harness: `lib/fraud/eval-harness.ts`
 
 ---
 

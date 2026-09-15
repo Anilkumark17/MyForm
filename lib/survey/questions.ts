@@ -3,11 +3,11 @@ import {
   QUESTION_TYPE_MAP,
   type QuestionTypeId,
 } from "@/lib/survey/question-types"
+import { normalizeShowIf, type ShowIfRule } from "@/lib/survey/conditional"
 import type {
   ComparisonOptionContentType,
   ComparisonRevealMode,
   ComparisonSelectionMode,
-  ShowIfRule,
 } from "@/lib/survey/comparison"
 
 export type AnswerOption = {
@@ -46,8 +46,17 @@ export type QuestionConfig = {
   beforeAfterSlider?: boolean
   rateMin?: number
   rateMax?: number
-  /** Conditional visibility — show when source answer branch equals option id */
+  /** Conditional visibility — show this question only when prior answers match */
   showIf?: ShowIfRule
+  /** Flow builder: question set this card belongs to */
+  groupId?: string
+  groupName?: string
+  /** Flow builder: node position (relative when grouped) */
+  flowX?: number
+  flowY?: number
+  /** Flow builder: parent group node position */
+  groupX?: number
+  groupY?: number
 }
 
 export type SurveyQuestion = {
@@ -64,6 +73,56 @@ function id() {
 
 export function createOption(label = "Option"): AnswerOption {
   return { id: id(), label, contentType: "text" }
+}
+
+export function isBlankOption(option: AnswerOption) {
+  return (
+    !option.label.trim() &&
+    !option.imageUrl?.trim() &&
+    !option.caption?.trim() &&
+    !option.beforeImageUrl?.trim() &&
+    !option.afterImageUrl?.trim()
+  )
+}
+
+export function labeledAnswerOptions(options: AnswerOption[]) {
+  return options.filter((option) => !isBlankOption(option))
+}
+
+export function draftOptionId(questionId: string) {
+  return `draft:${questionId}`
+}
+
+export function isDraftOptionId(optionId: string) {
+  return optionId.startsWith("draft:")
+}
+
+export function optionRowsForEditor(
+  options: AnswerOption[],
+  questionId: string,
+  createBlank: () => AnswerOption = () => createOption("")
+): AnswerOption[] {
+  const labeled = labeledAnswerOptions(options)
+  if (options.some(isBlankOption)) {
+    const blank = options.find(isBlankOption) ?? createBlank()
+    return [...labeled, blank]
+  }
+  return [...labeled, { ...createBlank(), id: draftOptionId(questionId) }]
+}
+
+export function commitOptionLabel(
+  options: AnswerOption[],
+  optionId: string,
+  label: string,
+  createBlank: () => AnswerOption = () => createOption("")
+): AnswerOption[] {
+  if (isDraftOptionId(optionId)) {
+    if (!label.trim()) return labeledAnswerOptions(options)
+    return [...labeledAnswerOptions(options), { ...createBlank(), label }]
+  }
+  return options.map((option) =>
+    option.id === optionId ? { ...option, label } : option
+  )
 }
 
 export function createComparisonOption(
@@ -211,8 +270,49 @@ export function applyTypeChange(
     ...question,
     type,
     options: keepOptions ? question.options : defaultOptionsForType(type),
-    config: defaultConfigForType(type),
+    config: {
+      ...defaultConfigForType(type),
+      showIf: question.config.showIf,
+      groupId: question.config.groupId,
+      groupName: question.config.groupName,
+      flowX: question.config.flowX,
+      flowY: question.config.flowY,
+      groupX: question.config.groupX,
+      groupY: question.config.groupY,
+      required: question.config.required,
+    },
   }
+}
+
+export function duplicateQuestion(question: SurveyQuestion): SurveyQuestion {
+  return {
+    ...question,
+    id: id(),
+    prompt: question.prompt.trim()
+      ? `${question.prompt.trim()} (copy)`
+      : "",
+    options: question.options.map((option) => ({
+      ...option,
+      id: id(),
+    })),
+    config: {
+      ...question.config,
+      showIf: undefined,
+      flowX: (question.config.flowX ?? 0) + 48,
+      flowY: (question.config.flowY ?? 0) + 48,
+    },
+  }
+}
+
+function asOptionalString(raw: unknown): string | undefined {
+  if (raw == null) return undefined
+  const value = String(raw).trim()
+  return value ? value : undefined
+}
+
+function asOptionalNumber(raw: unknown): number | undefined {
+  const num = Number(raw)
+  return Number.isFinite(num) ? num : undefined
 }
 
 function normalizeOptions(raw: unknown): AnswerOption[] {
@@ -262,15 +362,6 @@ function normalizeOptions(raw: unknown): AnswerOption[] {
   return options
 }
 
-function normalizeShowIf(raw: unknown): ShowIfRule | undefined {
-  if (!raw || typeof raw !== "object") return undefined
-  const rule = raw as Partial<ShowIfRule>
-  const questionId = String(rule.questionId ?? "").trim()
-  const equals = String(rule.equals ?? "").trim()
-  if (!questionId || !equals) return undefined
-  return { questionId, equals }
-}
-
 export function normalizeSurveyQuestion(raw: unknown): SurveyQuestion | null {
   if (typeof raw === "string") {
     const prompt = raw.trim()
@@ -286,8 +377,10 @@ export function normalizeSurveyQuestion(raw: unknown): SurveyQuestion | null {
 
   if (!raw || typeof raw !== "object") return null
   const item = raw as Record<string, unknown>
+  const existingId = String(item.id ?? "").trim()
   const prompt = String(item.prompt ?? item.text ?? item.question ?? "").trim()
-  if (!prompt) return null
+  // Keep in-progress drafts that already have an id, even before a prompt is typed.
+  if (!prompt && !existingId) return null
 
   const typeValue = String(item.type ?? "long_text")
   const type = isQuestionTypeId(typeValue) ? typeValue : "long_text"
@@ -314,6 +407,16 @@ export function normalizeSurveyQuestion(raw: unknown): SurveyQuestion | null {
     ...baseConfig,
     ...incoming,
     showIf: normalizeShowIf(incoming.showIf ?? item.showIf),
+    required:
+      incoming.required != null
+        ? Boolean(incoming.required)
+        : Boolean(item.required),
+    groupId: asOptionalString(incoming.groupId ?? item.groupId),
+    groupName: asOptionalString(incoming.groupName ?? item.groupName),
+    flowX: asOptionalNumber(incoming.flowX ?? item.flowX),
+    flowY: asOptionalNumber(incoming.flowY ?? item.flowY),
+    groupX: asOptionalNumber(incoming.groupX ?? item.groupX),
+    groupY: asOptionalNumber(incoming.groupY ?? item.groupY),
     questionImage:
       incoming.questionImage != null
         ? String(incoming.questionImage)
@@ -329,7 +432,7 @@ export function normalizeSurveyQuestion(raw: unknown): SurveyQuestion | null {
   }
 
   return {
-    id: String(item.id ?? id()),
+    id: existingId || id(),
     prompt,
     type,
     options,
@@ -348,6 +451,17 @@ export function parseSurveyQuestions(raw: string | null): SurveyQuestion[] {
   } catch {
     return []
   }
+}
+
+export function isPublicSurveyQuestion(question: SurveyQuestion) {
+  return question.type !== "hidden" && question.prompt.trim().length > 0
+}
+
+export function forPublicForm(questions: SurveyQuestion[]): SurveyQuestion[] {
+  return questions.filter(isPublicSurveyQuestion).map((question) => ({
+    ...question,
+    options: labeledAnswerOptions(question.options),
+  }))
 }
 
 export function suggestTypeFromPrompt(prompt: string): QuestionTypeId {
