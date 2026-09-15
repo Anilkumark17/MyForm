@@ -17,6 +17,7 @@ import {
   type Edge,
   type Node,
   type OnConnect,
+  type EdgeMouseHandler,
   type OnEdgesChange,
   type OnNodeDrag,
   type OnNodesChange,
@@ -105,6 +106,7 @@ function toXyEdges(questions: SurveyQuestion[]): Edge[] {
     label: edge.kind === "branch" ? edge.label : undefined,
     animated: edge.kind === "branch",
     selectable: true,
+    focusable: true,
     deletable: edge.kind === "branch",
     reconnectable: edge.kind === "branch",
     style: {
@@ -117,13 +119,29 @@ function toXyEdges(questions: SurveyQuestion[]): Edge[] {
       width: 16,
       height: 16,
     },
-    labelStyle: { fontSize: 11, fill: "var(--muted-foreground)" },
+    labelStyle: { fontSize: 13, fontWeight: 500, fill: "var(--foreground)" },
     data: { kind: edge.kind, removable: edge.kind === "branch" },
   }))
 }
 
+function withEdgeSelection(edges: Edge[], selectedIds: Set<string>): Edge[] {
+  return edges.map((edge) => {
+    const selected = selectedIds.has(edge.id)
+    const branch = edge.data?.kind === "branch"
+    return {
+      ...edge,
+      selected,
+      zIndex: selected ? 1000 : branch ? 1 : 0,
+      style: {
+        ...edge.style,
+        strokeWidth: selected ? (branch ? 3.5 : 2.5) : branch ? 2 : 1.5,
+      },
+    }
+  })
+}
+
 function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
-  const { screenToFlowPosition, fitView, deleteElements } = useReactFlow()
+  const { screenToFlowPosition, fitView } = useReactFlow()
   const questionsRef = useRef(questions)
   questionsRef.current = questions
 
@@ -134,8 +152,21 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
-    setNodes(toXyNodes(questions))
-    setEdges(toXyEdges(questions))
+    setNodes((current) => {
+      const selected = new Set(
+        current.filter((node) => node.selected).map((node) => node.id)
+      )
+      return toXyNodes(questions).map((node) => ({
+        ...node,
+        selected: selected.has(node.id),
+      }))
+    })
+    setEdges((current) =>
+      withEdgeSelection(
+        toXyEdges(questions),
+        new Set(current.filter((edge) => edge.selected).map((edge) => edge.id))
+      )
+    )
   }, [questions])
 
   useEffect(() => {
@@ -184,13 +215,25 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
   )
 
   const onEdgesChange: OnEdgesChange = useCallback((changes) => {
-    setEdges((current) => applyEdgeChanges(changes, current))
+    setEdges((current) => {
+      const next = applyEdgeChanges(changes, current)
+      return withEdgeSelection(
+        next,
+        new Set(next.filter((edge) => edge.selected).map((edge) => edge.id))
+      )
+    })
   }, [])
 
-  const onEdgesDelete = useCallback(
+  const removeBranchEdges = useCallback(
     (deleted: Edge[]) => {
+      const branchEdges = deleted.filter((edge) => parseBranchEdgeId(edge.id))
+      if (branchEdges.length === 0) return
+
+      const removedIds = new Set(branchEdges.map((edge) => edge.id))
+      setEdges((current) => current.filter((edge) => !removedIds.has(edge.id)))
+
       let nextQuestions = questionsRef.current
-      for (const edge of deleted) {
+      for (const edge of branchEdges) {
         const parsed = parseBranchEdgeId(edge.id)
         if (!parsed) continue
         const targets = parsed.targetGroupId
@@ -212,6 +255,21 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
     },
     [onChange]
   )
+
+  const onEdgesDelete = useCallback(
+    (deleted: Edge[]) => {
+      removeBranchEdges(deleted)
+    },
+    [removeBranchEdges]
+  )
+
+  const onEdgeClick: EdgeMouseHandler = useCallback((_event, edge) => {
+    setNodes((current) =>
+      current.map((node) => ({ ...node, selected: false }))
+    )
+    setEdges((current) => withEdgeSelection(current, new Set([edge.id])))
+    setNotice(null)
+  }, [])
 
   const onNodesDelete = useCallback(
     (deleted: Node[]) => {
@@ -349,13 +407,11 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
   function removeSelectedConnections() {
     const selected = edges.filter((edge) => edge.selected && edge.deletable)
     if (selected.length === 0) {
-      setNotice("Select a colored branch, then remove it — or click the X on the line.")
+      setNotice("Click a colored connection first, then remove it.")
       return
     }
     setNotice(null)
-    void deleteElements({
-      edges: selected.map((edge) => ({ id: edge.id })),
-    })
+    removeBranchEdges(selected)
   }
 
   const selectedBranchCount = edges.filter(
@@ -399,11 +455,11 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
 
   const canvasHelp = (
     <>
-      <p className="text-xs text-muted-foreground">
-        <GitBranchIcon className="mr-1 inline size-3.5" />
-        Drag from an answer dot to a later question to branch. Questions with no
-        conditions stay linked to the previous question. Click the X on a branch
-        to remove it.
+      <p className="text-sm leading-6 text-muted-foreground">
+        <GitBranchIcon className="mr-1 inline size-4 align-text-bottom" />
+        Drag from an answer dot to a later question to branch. Click a
+        connection to select it, then Remove connection — or use the X on the
+        line. Each answer only continues to the questions you connect.
       </p>
       {notice ? (
         <Alert>
@@ -411,7 +467,7 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
         </Alert>
       ) : null}
       {issues.length > 0 ? (
-        <ul className="space-y-1 text-xs">
+        <ul className="space-y-1.5 text-sm leading-6">
           {issues.map((issue) => (
             <li
               key={`${issue.severity}-${issue.message}`}
@@ -433,7 +489,7 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
           ))}
         </ul>
       ) : questions.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Flow looks complete. Changes save automatically.
         </p>
       ) : null}
@@ -462,6 +518,7 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
           onNodeDragStop={onNodeDragStop}
           onNodesDelete={onNodesDelete}
           onEdgesDelete={onEdgesDelete}
+          onEdgeClick={onEdgeClick}
           isValidConnection={isValidConnection}
           fitView
           fitViewOptions={{ padding: 0.16 }}
@@ -472,6 +529,9 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
           maxZoom={2}
           colorMode="dark"
           edgesReconnectable
+          edgesFocusable
+          elementsSelectable
+          selectNodesOnDrag={false}
           className="h-full w-full"
         >
           <Background
@@ -482,34 +542,28 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
           />
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable />
-          <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5.5rem)] flex-wrap gap-2">
-            <Button type="button" size="sm" onClick={addQuestionAtCenter}>
+          <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-6.5rem)] flex-wrap gap-2">
+            <Button type="button" onClick={addQuestionAtCenter}>
               <PlusIcon data-icon="inline-start" />
               Add question
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={groupSelected}
-            >
+            <Button type="button" variant="outline" onClick={groupSelected}>
               <SquareStackIcon data-icon="inline-start" />
               Group selected
             </Button>
             <Button
               type="button"
-              size="sm"
               variant="outline"
+              disabled={selectedBranchCount === 0}
               onClick={removeSelectedConnections}
             >
               <UnlinkIcon data-icon="inline-start" />
-              {selectedBranchCount > 0
-                ? `Remove connection${selectedBranchCount > 1 ? "s" : ""}`
+              {selectedBranchCount > 1
+                ? `Remove ${selectedBranchCount} connections`
                 : "Remove connection"}
             </Button>
             <Button
               type="button"
-              size="sm"
               variant="outline"
               onClick={() => {
                 onChange(layoutFlow(questionsRef.current))
@@ -523,7 +577,6 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
           <div className="absolute top-3 right-3 z-10">
             <Button
               type="button"
-              size="sm"
               variant="outline"
               onClick={() => setMaximized((open) => !open)}
               aria-label={maximized ? "Minimise canvas" : "Maximise canvas"}

@@ -30,7 +30,7 @@ export function BranchFlowEdge({
   label,
   selected,
 }: EdgeProps<Edge<BranchFlowEdgeData>>) {
-  const { deleteElements } = useReactFlow()
+  const { deleteElements, setEdges } = useReactFlow()
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -45,18 +45,34 @@ export function BranchFlowEdge({
       <BaseEdge
         path={edgePath}
         markerEnd={markerEnd}
-        style={style}
-        interactionWidth={24}
+        style={{
+          ...style,
+          strokeWidth: selected ? 3.5 : (style?.strokeWidth ?? 2),
+        }}
+        interactionWidth={28}
       />
       <EdgeLabelRenderer>
         <div
-          className="nodrag nopan pointer-events-auto absolute flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[11px] shadow-sm"
+          className={`nodrag nopan pointer-events-auto absolute flex items-center gap-1 rounded-md border px-2 py-1 text-sm shadow-sm ${
+            selected
+              ? "border-foreground/40 bg-background"
+              : "border-border/70 bg-background/95"
+          }`}
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
           }}
+          onClick={(event) => {
+            event.stopPropagation()
+            setEdges((current) =>
+              current.map((edge) => ({
+                ...edge,
+                selected: edge.id === id,
+              }))
+            )
+          }}
         >
           {label ? (
-            <span className="max-w-28 truncate text-muted-foreground">
+            <span className="max-w-36 truncate font-medium text-foreground">
               {String(label)}
             </span>
           ) : null}
@@ -65,7 +81,7 @@ export function BranchFlowEdge({
             size="icon-xs"
             variant={selected ? "secondary" : "ghost"}
             aria-label="Remove connection"
-            className="size-5"
+            className="size-6"
             onClick={(event) => {
               event.stopPropagation()
               void deleteElements({ edges: [{ id }] })

@@ -1,8 +1,9 @@
 import { Graph, layout } from "@dagrejs/dagre"
 
 import {
+  followUpIdsForOption,
+  hasOutgoingBranches,
   hasShowIf,
-  isFollowUpForOption,
   normalizeShowIf,
   toggleFollowUpForOption,
   type ShowIfRule,
@@ -13,11 +14,13 @@ import {
   type SurveyQuestion,
 } from "@/lib/survey/questions"
 
-export const QUESTION_NODE_WIDTH = 280
-export const GROUP_NODE_WIDTH = 320
-const GROUP_HEADER = 52
+export const QUESTION_NODE_WIDTH = 320
+export const GROUP_NODE_WIDTH = 360
+const GROUP_HEADER = 56
 const GROUP_PAD = 16
-const CHILD_GAP = 14
+const CHILD_GAP = 16
+const OPTION_ROW_HEIGHT = 36
+const QUESTION_NODE_HEADER = 104
 
 const BRANCH_COLORS = [
   "#0f6e56",
@@ -102,7 +105,8 @@ export function branchColor(key: string) {
 
 export function estimateQuestionHeight(question: SurveyQuestion) {
   const options = Math.max(labeledAnswerOptions(question.options).length, 1)
-  return 96 + options * 30
+  const mergeRow = labeledAnswerOptions(question.options).length > 0 ? OPTION_ROW_HEIGHT : 8
+  return QUESTION_NODE_HEADER + options * OPTION_ROW_HEIGHT + mergeRow
 }
 
 export function listQuestionGroups(
@@ -143,9 +147,33 @@ export function collectBranchTargets(
   sourceId: string,
   optionId: string
 ): string[] {
-  return questions
-    .filter((question) => isFollowUpForOption(question, sourceId, optionId))
-    .map((question) => question.id)
+  return followUpIdsForOption(questions, sourceId, optionId)
+}
+
+function sharesFollowUpOption(
+  from: SurveyQuestion,
+  to: SurveyQuestion
+): boolean {
+  const fromRule = normalizeShowIf(from.config.showIf)
+  const toRule = normalizeShowIf(to.config.showIf)
+  if (!fromRule || !toRule) return false
+  for (const fromCondition of fromRule.conditions) {
+    if (fromCondition.operator !== "is") continue
+    for (const toCondition of toRule.conditions) {
+      if (
+        toCondition.operator !== "is" ||
+        fromCondition.questionId !== toCondition.questionId
+      ) {
+        continue
+      }
+      if (
+        fromCondition.values.some((value) => toCondition.values.includes(value))
+      ) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 function adjacency(questions: SurveyQuestion[]): Map<string, Set<string>> {
@@ -684,7 +712,10 @@ function appendDefaultSequenceEdges(
   for (let index = 0; index < questions.length - 1; index++) {
     const fromQuestion = questions[index]
     const toQuestion = questions[index + 1]
-    if (hasShowIf(toQuestion)) continue
+    const sameBranch = sharesFollowUpOption(fromQuestion, toQuestion)
+    if (hasShowIf(toQuestion) && !sameBranch) continue
+    if (hasOutgoingBranches(questions, fromQuestion) && !sameBranch) continue
+    if (hasShowIf(fromQuestion) && !hasShowIf(toQuestion)) continue
 
     const fromGroup = fromQuestion.config.groupId
     const toGroup = toQuestion.config.groupId

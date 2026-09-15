@@ -154,7 +154,7 @@ export function ComparisonOptionEditor({
         <div className="flex items-center justify-between gap-2">
           <div>
             <Label>Options</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Each option is an image plus a short title. Add as many as you
               need.
             </p>

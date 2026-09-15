@@ -133,7 +133,47 @@ describe("conditional visibility", () => {
 
   it("hides dependents until the source is answered", () => {
     const ids = getVisibleQuestions(questions, {}).map((question) => question.id)
-    assert.deepEqual(ids, ["q1", "q6"])
+    assert.deepEqual(ids, ["q1"])
+  })
+
+  it("never enters the other option's branch", () => {
+    const ids = getVisibleQuestions([userType, setA1, setB1], {
+      q1: "opt-a",
+    }).map((question) => question.id)
+    assert.deepEqual(ids, ["q1", "q2"])
+  })
+
+  it("ends the path when the selected option has no follow-up connection", () => {
+    const ids = getVisibleQuestions([userType, setA1], { q1: "opt-b" }).map(
+      (question) => question.id
+    )
+    assert.deepEqual(ids, ["q1"])
+  })
+
+  it("skips unrelated questions sitting inside a branch block", () => {
+    const mid = text("q-mid", "Unrelated filler")
+    const ids = getVisibleQuestions(
+      [userType, setA1, mid, setB1, always],
+      { q1: "opt-a" }
+    ).map((question) => question.id)
+    assert.deepEqual(ids, ["q1", "q2", "q6"])
+  })
+
+  it("drops a follow-up from the path when its connection is removed", () => {
+    let list = [userType, text("q2", "Student follow-up"), text("q4", "Pro follow-up")]
+    list = toggleFollowUpForOption(list, "q1", "opt-a", "q2", true)
+    list = toggleFollowUpForOption(list, "q1", "opt-b", "q4", true)
+    assert.deepEqual(
+      getVisibleQuestions(list, { q1: "opt-a" }).map((question) => question.id),
+      ["q1", "q2"]
+    )
+
+    list = toggleFollowUpForOption(list, "q1", "opt-a", "q2", false)
+    const ids = getVisibleQuestions(list, { q1: "opt-a" }).map(
+      (question) => question.id
+    )
+    assert.equal(ids.includes("q2"), false)
+    assert.equal(ids.includes("q4"), false)
   })
 
   it("supports AND / OR across conditions", () => {

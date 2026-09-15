@@ -152,10 +152,11 @@
   html {
     @apply scroll-smooth antialiased;
     color-scheme: dark;
+    font-size: 16px;
   }
   body {
-    @apply bg-background text-foreground font-sans;
-    font-feature-settings: "ss01", "cv11";
+    @apply bg-background text-foreground font-sans text-[15px] leading-6;
+    font-feature-settings: "ss01", "cv11", "kern";
   }
   ::selection {
     background: color-mix(in oklab, var(--brand-signal) 35%, transparent);
@@ -163,7 +164,7 @@
   }
   .font-heading {
     font-family: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.025em;
   }
 }
 
@@ -175,10 +176,10 @@
     @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
   }
   .eyebrow {
-    @apply text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground;
+    @apply text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground;
   }
   .prose-muted {
-    @apply text-[15px] leading-relaxed text-muted-foreground;
+    @apply text-[15px] leading-7 text-muted-foreground;
   }
   .status-clean {
     color: var(--brand-signal);
@@ -220,10 +221,15 @@
 
 .react-flow {
   --xy-node-border-radius: var(--radius-lg);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
 .react-flow__handle {
   z-index: 12;
+}
+
+.react-flow__attribution {
+  display: none;
 }
 
 .react-flow__controls,
@@ -232,4 +238,14 @@
   box-shadow: none;
   overflow: hidden;
   border-radius: var(--radius-lg);
+}
+
+.react-flow__controls-button {
+  width: 28px;
+  height: 28px;
+}
+
+.react-flow__edge-text {
+  font-size: 13px !important;
+  font-weight: 500;
 }

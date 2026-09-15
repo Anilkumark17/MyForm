@@ -6,7 +6,7 @@ import { signOut } from "@/lib/auth/actions"
 export function SignOutButton() {
   return (
     <form action={signOut}>
-      <Button type="submit" variant="outline" size="sm" className="h-8">
+      <Button type="submit" variant="outline">
         Sign out
       </Button>
     </form>

@@ -241,13 +241,156 @@ export function isQuestionVisible(
   return rule.logic === "or" ? results.some(Boolean) : results.every(Boolean)
 }
 
+export function followUpIdsForOption(
+  questions: SurveyQuestion[],
+  sourceId: string,
+  optionId: string
+): string[] {
+  return questions
+    .filter((question) => isFollowUpForOption(question, sourceId, optionId))
+    .map((question) => question.id)
+}
+
+export function hasOutgoingBranches(
+  questions: SurveyQuestion[],
+  source: SurveyQuestion
+): boolean {
+  return source.options.some(
+    (option) => followUpIdsForOption(questions, source.id, option.id).length > 0
+  )
+}
+
+function questionIdsGatedBySource(
+  questions: SurveyQuestion[],
+  sourceId: string
+): Set<string> {
+  const gated = new Set<string>()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const question of questions) {
+      if (gated.has(question.id)) continue
+      const rule = normalizeShowIf(question.config.showIf)
+      if (!rule) continue
+      const dependsOnSource = rule.conditions.some(
+        (condition) =>
+          condition.questionId === sourceId || gated.has(condition.questionId)
+      )
+      if (dependsOnSource) {
+        gated.add(question.id)
+        changed = true
+      }
+    }
+  }
+  return gated
+}
+
+function indexAfterBranchRegion(
+  questions: SurveyQuestion[],
+  sourceId: string
+): number {
+  const gated = questionIdsGatedBySource(questions, sourceId)
+  let end = -1
+  for (let index = 0; index < questions.length; index++) {
+    if (gated.has(questions[index].id)) end = index
+  }
+  return end < 0 ? -1 : end + 1
+}
+
+function continueAfterBranch(
+  questions: SurveyQuestion[],
+  sourceId: string | undefined,
+  visit: (question: SurveyQuestion) => void
+) {
+  if (!sourceId) return
+  const after = indexAfterBranchRegion(questions, sourceId)
+  if (after >= 0 && after < questions.length) visit(questions[after])
+}
+
+/**
+ * Questions on the answered path. Option connections are go-to rules: pick A
+ * and only A's follow-ups run, sibling branches are skipped, and unrelated
+ * questions sitting inside a branch block are not shown.
+ */
 export function getVisibleQuestions(
   questions: SurveyQuestion[],
   answers: Record<string, unknown>
 ): SurveyQuestion[] {
-  return questions.filter((question) =>
-    isQuestionVisible(question, answers, questions)
-  )
+  if (questions.length === 0) return []
+
+  const byId = new Map(questions.map((question) => [question.id, question]))
+  const reachable = new Set<string>()
+
+  const visit = (question: SurveyQuestion | undefined) => {
+    if (!question || reachable.has(question.id)) return
+    if (!isQuestionVisible(question, answers, questions)) return
+    reachable.add(question.id)
+
+    const index = questions.findIndex((item) => item.id === question.id)
+
+    if (hasOutgoingBranches(questions, question)) {
+      const selected = selectedOptionIds(question, answers[question.id])
+      const targets = [
+        ...new Set(
+          selected.flatMap((optionId) =>
+            followUpIdsForOption(questions, question.id, optionId)
+          )
+        ),
+      ]
+        .map((id) => byId.get(id))
+        .filter((item): item is SurveyQuestion => Boolean(item))
+        .sort(
+          (left, right) =>
+            questions.findIndex((item) => item.id === left.id) -
+            questions.findIndex((item) => item.id === right.id)
+        )
+
+      for (const target of targets) visit(target)
+      return
+    }
+
+    const next = questions[index + 1]
+    if (!next) {
+      continueAfterBranch(
+        questions,
+        normalizeShowIf(question.config.showIf)?.conditions[0]?.questionId,
+        visit
+      )
+      return
+    }
+
+    if (isQuestionVisible(next, answers, questions) && hasShowIf(next)) {
+      visit(next)
+      return
+    }
+
+    if (
+      hasShowIf(question) &&
+      (!hasShowIf(next) || !isQuestionVisible(next, answers, questions))
+    ) {
+      continueAfterBranch(
+        questions,
+        normalizeShowIf(question.config.showIf)?.conditions[0]?.questionId,
+        visit
+      )
+      return
+    }
+
+    if (!isQuestionVisible(next, answers, questions)) {
+      continueAfterBranch(
+        questions,
+        normalizeShowIf(next.config.showIf)?.conditions[0]?.questionId ??
+          normalizeShowIf(question.config.showIf)?.conditions[0]?.questionId,
+        visit
+      )
+      return
+    }
+
+    visit(next)
+  }
+
+  visit(questions[0])
+  return questions.filter((question) => reachable.has(question.id))
 }
 
 /** Keep answers for the visible path (plus hidden fields / attribution keys). */
@@ -255,12 +398,13 @@ export function answersForVisiblePath(
   questions: SurveyQuestion[],
   answers: Record<string, unknown>
 ): Record<string, unknown> {
+  const visibleIds = new Set(
+    getVisibleQuestions(questions, answers).map((question) => question.id)
+  )
   const keepIds = new Set(
     questions
       .filter(
-        (question) =>
-          question.type === "hidden" ||
-          isQuestionVisible(question, answers, questions)
+        (question) => question.type === "hidden" || visibleIds.has(question.id)
       )
       .map((question) => question.id)
   )

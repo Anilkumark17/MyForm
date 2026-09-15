@@ -5,6 +5,8 @@ export type FormDraft = {
   startedAt: number
   perFieldTimeMs: Record<string, number>
   updatedAt: number
+  currentQuestionId?: string
+  welcomeDone?: boolean
 }
 
 export function draftKey(formId: string) {
@@ -23,6 +25,11 @@ export function loadDraft(formId: string): FormDraft | null {
       startedAt: Number(parsed.startedAt) || Date.now(),
       perFieldTimeMs: parsed.perFieldTimeMs ?? {},
       updatedAt: Number(parsed.updatedAt) || Date.now(),
+      currentQuestionId:
+        typeof parsed.currentQuestionId === "string"
+          ? parsed.currentQuestionId
+          : undefined,
+      welcomeDone: Boolean(parsed.welcomeDone),
     }
   } catch {
     return null

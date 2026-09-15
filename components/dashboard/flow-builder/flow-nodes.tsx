@@ -45,6 +45,9 @@ function useFlowActions() {
   return actions
 }
 
+const handleClass =
+  "!size-3 !border-2 !border-background !bg-foreground !static !translate-x-0 !translate-y-0 !transform-none"
+
 export function QuestionFlowNode({
   data,
   selected,
@@ -59,7 +62,7 @@ export function QuestionFlowNode({
   return (
     <div
       className={cn(
-        "w-[280px] rounded-lg border bg-card shadow-sm",
+        "w-[320px] rounded-xl border bg-card shadow-sm",
         selected ? "border-foreground" : "border-border"
       )}
     >
@@ -67,25 +70,25 @@ export function QuestionFlowNode({
         type="target"
         position={Position.Left}
         id="in"
-        className="!size-2.5 !border-2 !border-background !bg-[var(--brand-signal)]"
+        className="!size-3 !border-2 !border-background !bg-[var(--brand-signal)]"
       />
-      <div className="flex items-start justify-between gap-2 border-b border-border/80 px-3 py-2">
+      <div className="flex items-start justify-between gap-2 border-b border-border/80 px-3.5 py-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1">
-            <p className="text-[11px] font-medium text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="text-sm font-medium text-muted-foreground">
               Q{data.index + 1}
             </p>
             <Badge variant="outline">{data.typeLabel}</Badge>
             {data.required ? (
               <Badge variant="secondary">Required</Badge>
             ) : (
-              <span className="text-[11px] text-muted-foreground">Optional</span>
+              <span className="text-sm text-muted-foreground">Optional</span>
             )}
             {data.hasShowIf ? (
               <Badge variant="secondary">Branched</Badge>
             ) : null}
           </div>
-          <p className="mt-1 line-clamp-2 text-sm font-medium leading-snug">
+          <p className="font-heading mt-1.5 line-clamp-2 text-[15px] font-medium leading-snug">
             {data.prompt}
           </p>
         </div>
@@ -131,32 +134,31 @@ export function QuestionFlowNode({
         </div>
       </div>
       <div className="space-y-0.5 px-2 py-2">
-        {options.map((option, optionIndex) => (
+        {options.map((option) => (
           <div
             key={option.id}
-            className="flex min-h-7 items-center rounded-md px-2 text-xs hover:bg-muted/60"
+            className="flex min-h-9 items-center rounded-md px-2.5 text-[15px] hover:bg-muted/60"
           >
-            <span className="mr-2 size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
-            <span className="min-w-0 flex-1 truncate pr-3">
+            <span className="mr-2.5 size-2 shrink-0 rounded-full bg-muted-foreground/50" />
+            <span className="min-w-0 flex-1 truncate pr-2 leading-snug">
               {fakeContinue ? "Then continue" : option.label}
             </span>
             <Handle
               type="source"
               position={Position.Right}
               id={fakeContinue ? "next" : optionHandleId(option.id)}
-              style={{ top: 62 + optionIndex * 30 }}
-              className="!size-2.5 !border-2 !border-background !bg-foreground"
+              className={handleClass}
             />
           </div>
         ))}
         {data.options.length > 0 ? (
-          <div className="flex min-h-7 items-center px-2 text-[11px] text-muted-foreground">
-            <span className="min-w-0 flex-1">Then / merge</span>
+          <div className="flex min-h-9 items-center px-2.5 text-sm text-muted-foreground">
+            <span className="min-w-0 flex-1">Then continue</span>
             <Handle
               type="source"
               position={Position.Bottom}
               id="next"
-              className="!size-2.5 !border-2 !border-background !bg-muted-foreground"
+              className="!size-3 !border-2 !border-background !bg-muted-foreground"
             />
           </div>
         ) : null}
@@ -181,17 +183,17 @@ export function GroupFlowNode({
         type="target"
         position={Position.Left}
         id="in"
-        className="!size-3 !border-2 !border-background !bg-[var(--brand-signal)]"
+        className="!size-3.5 !border-2 !border-background !bg-[var(--brand-signal)]"
       />
       <Handle
         type="source"
         position={Position.Right}
         id="next"
-        className="!size-3 !border-2 !border-background !bg-muted-foreground"
+        className="!size-3.5 !border-2 !border-background !bg-muted-foreground"
       />
-      <div className="flex items-center gap-2 px-3 py-3">
+      <div className="flex items-center gap-2 px-3.5 py-3">
         <input
-          className="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-sm font-medium outline-none hover:border-border focus:border-ring"
+          className="font-heading h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-[15px] font-medium outline-none hover:border-border focus:border-ring"
           defaultValue={data.prompt}
           aria-label="Question set name"
           onBlur={(event) =>
@@ -203,7 +205,7 @@ export function GroupFlowNode({
             }
           }}
         />
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-sm text-muted-foreground">
           {data.memberCount} questions
         </span>
       </div>

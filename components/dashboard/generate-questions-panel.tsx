@@ -109,14 +109,14 @@ export function GenerateQuestionsPanel({
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-heading text-lg font-semibold tracking-tight">
+          <h2 className="font-heading text-xl font-semibold tracking-tight">
             Survey questions
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Generate Mom Test questions, then map branches in Flow Builder or
             edit the list.
           </p>
-          <p className="mt-1.5 text-xs text-muted-foreground">
+          <p className="mt-1.5 text-sm text-muted-foreground">
             {generationsUnlimited
               ? "Unlimited AI generations on this account."
               : generationsRemaining === 0
@@ -127,7 +127,7 @@ export function GenerateQuestionsPanel({
         <Button
           type="button"
           size="lg"
-          className="h-9 px-3.5"
+          className="px-3.5"
           onClick={handleGenerate}
           disabled={pending || (!generationsUnlimited && generationsRemaining === 0)}
         >

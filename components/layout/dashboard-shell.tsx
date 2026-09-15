@@ -51,11 +51,11 @@ export function DashboardShell({
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-md">
-        <div className="page flex h-14 items-center justify-between gap-6">
+        <div className="page flex h-16 items-center justify-between gap-6">
           <div className="flex items-center gap-8">
             <Link
               href="/dashboard"
-              className="font-heading text-lg font-semibold tracking-tight"
+              className="font-heading text-xl font-semibold tracking-tight"
             >
               Myform
             </Link>
@@ -104,7 +104,7 @@ export function DashboardShell({
             <div className="flex items-center gap-1.5">
               <div
                 className={cn(
-                  "rounded-md px-2 py-1 text-xs font-medium tabular-nums",
+                  "rounded-md px-2.5 py-1 text-sm font-medium tabular-nums",
                   unlimited
                     ? "bg-secondary text-muted-foreground"
                     : (projectsRemaining ?? 0) === 0
@@ -117,7 +117,7 @@ export function DashboardShell({
               </div>
               <div
                 className={cn(
-                  "rounded-md px-2 py-1 text-xs font-medium tabular-nums",
+                  "rounded-md px-2.5 py-1 text-sm font-medium tabular-nums",
                   unlimited
                     ? "bg-secondary text-muted-foreground"
                     : generationsRemaining === 0
@@ -131,7 +131,7 @@ export function DashboardShell({
             </div>
             <div className="hidden text-right sm:block">
               <p className="text-sm font-medium leading-none">{userName}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{userEmail}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{userEmail}</p>
             </div>
             <SignOutButton />
           </div>

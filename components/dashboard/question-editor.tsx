@@ -348,7 +348,7 @@ export function QuestionEditor({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <Badge variant={collab.connected ? "secondary" : "outline"}>
           {collab.connected ? "Live sync on" : "Connecting…"}
         </Badge>
@@ -400,7 +400,7 @@ export function QuestionEditor({
           >
             <div className="mb-3 flex items-start justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
-                <p className="text-xs font-medium text-muted-foreground">
+                <p className="font-heading text-sm font-medium text-muted-foreground">
                   Question {index + 1}
                 </p>
                 {question.config.groupName ? (
@@ -461,7 +461,7 @@ export function QuestionEditor({
                     </NativeSelectOptGroup>
                   ))}
                 </NativeSelect>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm leading-6 text-muted-foreground">
                   {meta.description}
                 </p>
               </div>
@@ -782,7 +782,7 @@ function AutosaveStatus({
     <div className="flex flex-wrap items-center gap-2">
       <span
         className={cn(
-          "text-xs",
+          "text-sm",
           status === "error" ? "text-destructive" : "text-muted-foreground"
         )}
       >
@@ -812,12 +812,11 @@ function ViewToggle({
   onChange: (view: "editor" | "flow") => void
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1">
       <Button
         type="button"
-        size="sm"
         variant={view === "editor" ? "secondary" : "ghost"}
-        className={cn("h-7 gap-1.5", view === "editor" && "shadow-sm")}
+        className={cn("gap-1.5", view === "editor" && "shadow-sm")}
         onClick={() => onChange("editor")}
       >
         <ListIcon data-icon="inline-start" />
@@ -825,9 +824,8 @@ function ViewToggle({
       </Button>
       <Button
         type="button"
-        size="sm"
         variant={view === "flow" ? "secondary" : "ghost"}
-        className={cn("h-7 gap-1.5", view === "flow" && "shadow-sm")}
+        className={cn("gap-1.5", view === "flow" && "shadow-sm")}
         onClick={() => onChange("flow")}
       >
         <GitBranchIcon data-icon="inline-start" />

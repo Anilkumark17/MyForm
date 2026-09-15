@@ -109,13 +109,13 @@ export function ConditionalLogicEditor({
 
       <div className="mt-3 space-y-4">
         {summary ? (
-          <p className="text-xs leading-relaxed text-muted-foreground">
+          <p className="text-sm leading-6 text-muted-foreground">
             Shown when {summary}.
           </p>
         ) : null}
 
         {previous.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Add a question above this one to show it only for certain answers.
           </p>
         ) : (
@@ -227,7 +227,7 @@ export function ConditionalLogicEditor({
           <div className="space-y-3 border-t border-border/70 pt-3">
             <div>
               <p className="text-sm font-medium">Then show questions</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <p className="mt-0.5 text-sm text-muted-foreground">
                 Pick which later questions appear for each answer. Nested
                 questions can also depend on those follow-ups.
               </p>
@@ -238,7 +238,7 @@ export function ConditionalLogicEditor({
                   key={option.id}
                   className="rounded-md border border-border/70 bg-background/70 p-3"
                 >
-                  <p className="text-xs font-medium text-muted-foreground">
+                  <p className="text-sm font-medium text-muted-foreground">
                     If “{option.label || "Untitled option"}” is selected
                   </p>
                   <div className="mt-2 space-y-1.5">
@@ -279,7 +279,7 @@ export function ConditionalLogicEditor({
             </div>
           </div>
         ) : branchable && later.length === 0 ? (
-          <p className="border-t border-border/70 pt-3 text-xs text-muted-foreground">
+          <p className="border-t border-border/70 pt-3 text-sm text-muted-foreground">
             Add questions below this one to show a different set for each
             answer.
           </p>
@@ -427,7 +427,7 @@ export function BranchingOverview({
         <GitBranchIcon className="size-3.5 text-muted-foreground" />
         Branching map
       </div>
-      <ul className="space-y-2 text-xs text-muted-foreground">
+      <ul className="space-y-2 text-sm leading-6 text-muted-foreground">
         {sources.map((source) => {
           const dependents = questionsDependingOn(questions, source.id)
           return (

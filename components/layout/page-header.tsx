@@ -21,7 +21,7 @@ export function PageHeader({
       )}
     >
       <div className="min-w-0 max-w-2xl">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-[2rem]">
           {title}
         </h1>
         {description ? (

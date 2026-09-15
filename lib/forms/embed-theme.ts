@@ -114,7 +114,7 @@ export function buildEmbedUrl(origin: string, formId: string, theme: EmbedTheme)
 
 export function buildEmbedSnippet(origin: string, formId: string, theme: EmbedTheme) {
   const src = buildEmbedUrl(origin, formId, theme)
-  const height = theme.compact ? 520 : 720
+  const height = theme.compact ? 560 : 780
   return `<iframe
   src="${src}"
   title="Myform"

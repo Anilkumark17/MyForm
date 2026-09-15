@@ -5,6 +5,7 @@ import {
   buildFlowGraph,
   connectOptionToTargets,
   createQuestionGroup,
+  disconnectOptionFromTargets,
   layoutFlow,
   parseBranchEdgeId,
   validateFlow,
@@ -94,6 +95,47 @@ describe("buildFlowGraph", () => {
     )
   })
 
+  it("does not auto-sequence a branch question onto an unrelated neighbor", () => {
+    const student = text("q2", "What are you studying?", {
+      showIf: {
+        logic: "and",
+        conditions: [{ questionId: "q1", operator: "is", values: ["opt-a"] }],
+      },
+    })
+    const other = text("q3", "Unrelated")
+    const { edges } = buildFlowGraph([q1, student, other])
+    const sequence = edges
+      .filter((edge) => edge.kind === "sequence")
+      .map((edge) => `${edge.source}->${edge.target}`)
+    assert.equal(sequence.includes("q1->q2"), false)
+    assert.equal(sequence.includes("q2->q3"), false)
+  })
+
+  it("sequences consecutive questions on the same option path", () => {
+    const first = text("q2", "Campus", {
+      showIf: {
+        logic: "and",
+        conditions: [{ questionId: "q1", operator: "is", values: ["opt-a"] }],
+      },
+    })
+    const second = text("q3", "Year", {
+      showIf: {
+        logic: "and",
+        conditions: [{ questionId: "q1", operator: "is", values: ["opt-a"] }],
+      },
+    })
+    const { edges } = buildFlowGraph([q1, first, second])
+    assert.equal(
+      edges.some(
+        (edge) =>
+          edge.kind === "sequence" &&
+          edge.source === "q2" &&
+          edge.target === "q3"
+      ),
+      true
+    )
+  })
+
   it("collapses a full-set branch onto the group node", () => {
     const grouped = createQuestionGroup(
       [
@@ -122,6 +164,27 @@ describe("connectOptionToTargets", () => {
     )
     assert.equal(next[1].config.showIf?.conditions[0]?.values[0], "opt-a")
     assert.equal(next[2].config.showIf?.conditions[0]?.values[0], "opt-a")
+  })
+})
+
+describe("disconnectOptionFromTargets", () => {
+  it("removes only that option relationship", () => {
+    const connected = connectOptionToTargets(
+      [q1, text("q2", "Student"), text("q3", "Pro")],
+      "q1",
+      "opt-a",
+      ["q2"]
+    )
+    const withBoth = connectOptionToTargets(connected, "q1", "opt-b", ["q3"])
+    const next = disconnectOptionFromTargets(withBoth, "q1", "opt-a", ["q2"])
+    assert.equal(next[1].config.showIf, undefined)
+    assert.equal(next[2].config.showIf?.conditions[0]?.values[0], "opt-b")
+    assert.equal(
+      buildFlowGraph(next).edges.some(
+        (edge) => edge.kind === "branch" && edge.target === "q2"
+      ),
+      false
+    )
   })
 })
 

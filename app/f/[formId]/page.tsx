@@ -52,7 +52,7 @@ export default async function PublicFormPage({
   if (theme.embed) {
     return (
       <div
-        className="min-h-screen px-2 py-2"
+        className="min-h-screen"
         style={{
           background:
             theme.background === "transparent" ? "transparent" : undefined,
@@ -69,15 +69,13 @@ export default async function PublicFormPage({
   }
 
   return (
-    <div className="min-h-screen bg-background px-4 py-14 sm:py-20">
-      <div className="mx-auto max-w-lg">
-        <PublicForm
-          formId={form.id}
-          formName={form.name}
-          questions={questions}
-          theme={{ ...theme, accent: theme.accent || "3ecf8e" }}
-        />
-      </div>
+    <div className="min-h-screen bg-background">
+      <PublicForm
+        formId={form.id}
+        formName={form.name}
+        questions={questions}
+        theme={{ ...theme, accent: theme.accent || "3ecf8e" }}
+      />
     </div>
   )
 }
