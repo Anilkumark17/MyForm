@@ -16,7 +16,7 @@ export type QuestionFlowData = {
   typeLabel: string
   required: boolean
   options: Array<{ id: string; label: string }>
-  hasShowIf: boolean
+  hasIncoming: boolean
 } & Record<string, unknown>
 
 export type GroupFlowData = {
@@ -84,8 +84,8 @@ export function QuestionFlowNode({
             ) : (
               <span className="text-sm text-muted-foreground">Optional</span>
             )}
-            {data.hasShowIf ? (
-              <Badge variant="secondary">Branched</Badge>
+            {data.hasIncoming ? (
+              <Badge variant="secondary">Jump target</Badge>
             ) : null}
           </div>
           <p className="font-heading mt-1.5 line-clamp-2 text-[15px] font-medium leading-snug">
@@ -120,7 +120,7 @@ export function QuestionFlowNode({
           >
             <Trash2Icon />
           </Button>
-          {data.hasShowIf ? (
+          {data.hasIncoming ? (
             <Button
               type="button"
               size="icon-xs"
@@ -143,6 +143,7 @@ export function QuestionFlowNode({
             <span className="min-w-0 flex-1 truncate pr-2 leading-snug">
               {fakeContinue ? "Then continue" : option.label}
             </span>
+
             <Handle
               type="source"
               position={Position.Right}
@@ -153,7 +154,9 @@ export function QuestionFlowNode({
         ))}
         {data.options.length > 0 ? (
           <div className="flex min-h-9 items-center px-2.5 text-sm text-muted-foreground">
-            <span className="min-w-0 flex-1">Then continue</span>
+            <span className="min-w-0 flex-1">
+              Then continue
+            </span>
             <Handle
               type="source"
               position={Position.Bottom}

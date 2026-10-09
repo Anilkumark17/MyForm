@@ -10,6 +10,7 @@ import { getProjectBaselines } from "@/lib/projects/baselines"
 import { getProjectInvitations } from "@/lib/projects/invitations"
 import { getProjectById } from "@/lib/projects/queries"
 import { getProjectSubmissions } from "@/lib/projects/submissions"
+import { normalizeFormSettings } from "@/lib/forms/settings"
 import { parseProjectQuestions } from "@/lib/projects/utils"
 import { cn } from "@/lib/utils"
 
@@ -84,6 +85,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
         generationsLimit={usage?.generations.limit ?? 4}
         generationsUnlimited={usage?.unlimited ?? false}
         baselines={baselines}
+        settings={normalizeFormSettings(project.settings)}
       />
     </div>
   )

@@ -1,12 +1,10 @@
 import { Graph, layout } from "@dagrejs/dagre"
 
 import {
-  followUpIdsForOption,
-  hasOutgoingBranches,
-  hasShowIf,
-  normalizeShowIf,
-  toggleFollowUpForOption,
-  type ShowIfRule,
+  branchRefs,
+  canBranchFrom as canBranchFromQuestion,
+  flowMemberIds,
+  toggleFlowMember,
 } from "@/lib/survey/conditional"
 import { QUESTION_TYPE_MAP } from "@/lib/survey/question-types"
 import {
@@ -48,7 +46,7 @@ export type FlowGraphNode = {
     typeLabel?: string
     required?: boolean
     options: Array<{ id: string; label: string }>
-    hasShowIf?: boolean
+    hasIncoming?: boolean
     memberCount?: number
   }
 }
@@ -142,82 +140,26 @@ function groupHeight(memberCount: number, memberHeights: number[]) {
   return GROUP_HEADER + GROUP_PAD + body + CHILD_GAP * Math.max(0, memberCount - 1) + GROUP_PAD
 }
 
+/** Questions that run when this answer is picked. */
 export function collectBranchTargets(
   questions: SurveyQuestion[],
   sourceId: string,
   optionId: string
 ): string[] {
-  return followUpIdsForOption(questions, sourceId, optionId)
+  return flowMemberIds(questions, sourceId, optionId)
 }
 
-function sharesFollowUpOption(
-  from: SurveyQuestion,
-  to: SurveyQuestion
-): boolean {
-  const fromRule = normalizeShowIf(from.config.showIf)
-  const toRule = normalizeShowIf(to.config.showIf)
-  if (!fromRule || !toRule) return false
-  for (const fromCondition of fromRule.conditions) {
-    if (fromCondition.operator !== "is") continue
-    for (const toCondition of toRule.conditions) {
-      if (
-        toCondition.operator !== "is" ||
-        fromCondition.questionId !== toCondition.questionId
-      ) {
-        continue
-      }
-      if (
-        fromCondition.values.some((value) => toCondition.values.includes(value))
-      ) {
-        return true
-      }
-    }
-  }
-  return false
-}
-
-function adjacency(questions: SurveyQuestion[]): Map<string, Set<string>> {
-  const graph = new Map<string, Set<string>>()
-  for (const question of questions) graph.set(question.id, new Set())
-  for (const source of questions) {
-    for (const option of source.options) {
-      for (const targetId of collectBranchTargets(questions, source.id, option.id)) {
-        graph.get(source.id)?.add(targetId)
-      }
-    }
-  }
-  return graph
-}
-
-function canReach(
-  graph: Map<string, Set<string>>,
-  from: string,
-  to: string
-): boolean {
-  const seen = new Set<string>()
-  const stack = [from]
-  while (stack.length) {
-    const node = stack.pop()!
-    if (node === to) return true
-    if (seen.has(node)) continue
-    seen.add(node)
-    for (const next of graph.get(node) ?? []) stack.push(next)
-  }
-  return false
-}
-
+/** A flow can only contain questions placed after its source. */
 export function wouldCreateCycle(
   questions: SurveyQuestion[],
   sourceId: string,
   targetIds: string[]
 ): boolean {
-  if (targetIds.includes(sourceId)) return true
-  const graph = adjacency(questions)
-  for (const targetId of targetIds) {
-    graph.get(sourceId)?.add(targetId)
-    if (canReach(graph, targetId, sourceId)) return true
-  }
-  return false
+  const sourceIndex = questions.findIndex((question) => question.id === sourceId)
+  if (sourceIndex < 0 || targetIds.length === 0) return true
+  return targetIds.some(
+    (id) => questions.findIndex((question) => question.id === id) <= sourceIndex
+  )
 }
 
 export function connectOptionToTargets(
@@ -228,7 +170,7 @@ export function connectOptionToTargets(
 ): SurveyQuestion[] {
   let next = questions
   for (const targetId of targetIds) {
-    next = toggleFollowUpForOption(next, sourceId, optionId, targetId, true)
+    next = toggleFlowMember(next, sourceId, optionId, targetId, true)
   }
   return next
 }
@@ -237,64 +179,14 @@ export function disconnectOptionFromTargets(
   questions: SurveyQuestion[],
   sourceId: string,
   optionId: string,
-  targetIds: string[]
+  targetIds?: string[]
 ): SurveyQuestion[] {
   let next = questions
-  for (const targetId of targetIds) {
-    next = toggleFollowUpForOption(next, sourceId, optionId, targetId, false)
+  for (const targetId of targetIds ??
+    flowMemberIds(questions, sourceId, optionId)) {
+    next = toggleFlowMember(next, sourceId, optionId, targetId, false)
   }
   return next
-}
-
-function mergeShowIf(
-  current: ShowIfRule | undefined,
-  incoming: ShowIfRule
-): ShowIfRule {
-  const existing = current?.conditions ?? []
-  const merged = existing.map((item) => ({
-    ...item,
-    values: [...item.values],
-  }))
-  for (const condition of incoming.conditions) {
-    const found = merged.find(
-      (item) =>
-        item.questionId === condition.questionId &&
-        item.operator === condition.operator
-    )
-    if (found) {
-      found.values = [...new Set([...found.values, ...condition.values])]
-    } else {
-      merged.push(condition)
-    }
-  }
-  return {
-    logic: existing.length && current?.logic === "and" ? "and" : "or",
-    conditions: merged,
-  }
-}
-
-/** Merge a branch into a shared follow-up (OR the source visibility onto the target). */
-export function connectMerge(
-  questions: SurveyQuestion[],
-  fromId: string,
-  toId: string
-): SurveyQuestion[] {
-  if (fromId === toId) return questions
-  const from = questions.find((question) => question.id === fromId)
-  const to = questions.find((question) => question.id === toId)
-  if (!from || !to) return questions
-  const inherited = normalizeShowIf(from.config.showIf)
-  if (!inherited) return questions
-  return questions.map((question) => {
-    if (question.id !== toId) return question
-    return {
-      ...question,
-      config: {
-        ...question.config,
-        showIf: mergeShowIf(normalizeShowIf(question.config.showIf), inherited),
-      },
-    }
-  })
 }
 
 export function createQuestionGroup(
@@ -464,12 +356,11 @@ export function layoutFlow(questions: SurveyQuestion[]): SurveyQuestion[] {
       groupByQuestion.get(source.id) != null
         ? groupNodeId(groupByQuestion.get(source.id)!)
         : source.id
-    for (const option of source.options) {
-      for (const targetId of collectBranchTargets(
-        questions,
-        source.id,
-        option.id
-      )) {
+    const targetIds = source.options.flatMap((option) =>
+      collectBranchTargets(questions, source.id, option.id)
+    )
+    {
+      for (const targetId of targetIds) {
         const to =
           groupByQuestion.get(targetId) != null
             ? groupNodeId(groupByQuestion.get(targetId)!)
@@ -599,69 +490,19 @@ export function buildFlowGraph(questions: SurveyQuestion[]): {
           id: option.id,
           label: option.label || "Untitled option",
         })),
-        hasShowIf: Boolean(normalizeShowIf(question.config.showIf)),
+        hasIncoming: branchRefs(question).length > 0,
       },
     })
   })
 
   for (const source of questions) {
     for (const option of labeledAnswerOptions(source.options)) {
-      const targets = collectBranchTargets(questions, source.id, option.id)
-      if (targets.length === 0) continue
       const color = branchColor(option.id)
-      const groupedTargets = new Map<string, string[]>()
-      const loose: string[] = []
-      for (const targetId of targets) {
-        const target = questions.find((item) => item.id === targetId)
-        const groupId = target?.config.groupId
-        if (groupId) {
-          const list = groupedTargets.get(groupId) ?? []
-          list.push(targetId)
-          groupedTargets.set(groupId, list)
-        } else {
-          loose.push(targetId)
-        }
-      }
-
-      for (const [groupId, memberIds] of groupedTargets) {
-        const group = groups.find((item) => item.id === groupId)
-        const coversAll =
-          group != null &&
-          group.questionIds.every((id) => memberIds.includes(id))
-        if (coversAll && group) {
-          edges.push({
-            id: `opt:${source.id}:${option.id}:g:${groupId}`,
-            source: source.id,
-            target: groupNodeId(groupId),
-            sourceHandle: optionHandleId(option.id),
-            targetHandle: "in",
-            kind: "branch",
-            label: option.label,
-            color,
-            optionId: option.id,
-            sourceQuestionId: source.id,
-            targetGroupId: groupId,
-          })
-        } else {
-          for (const targetId of memberIds) {
-            edges.push({
-              id: `opt:${source.id}:${option.id}:q:${targetId}`,
-              source: source.id,
-              target: targetId,
-              sourceHandle: optionHandleId(option.id),
-              targetHandle: "in",
-              kind: "branch",
-              label: option.label,
-              color,
-              optionId: option.id,
-              sourceQuestionId: source.id,
-              targetQuestionId: targetId,
-            })
-          }
-        }
-      }
-
-      for (const targetId of loose) {
+      for (const targetId of collectBranchTargets(
+        questions,
+        source.id,
+        option.id
+      )) {
         edges.push({
           id: `opt:${source.id}:${option.id}:q:${targetId}`,
           source: source.id,
@@ -679,73 +520,46 @@ export function buildFlowGraph(questions: SurveyQuestion[]): {
     }
   }
 
-  for (const group of groups) {
-    for (let i = 0; i < group.questionIds.length - 1; i++) {
-      const from = group.questionIds[i]
-      const to = group.questionIds[i + 1]
-      edges.push({
-        id: `seq:${from}:${to}`,
-        source: from,
-        target: to,
-        sourceHandle: "next",
-        targetHandle: "in",
-        kind: "sequence",
-        color: "#8a8d86",
-        sourceQuestionId: from,
-        targetQuestionId: to,
-      })
-    }
-  }
-
-  appendDefaultSequenceEdges(questions, groups, edges)
+  appendDefaultSequenceEdges(questions, edges)
 
   return { nodes, edges }
 }
 
+/** Dashed default path: top-level order, plus the order inside each flow. */
 function appendDefaultSequenceEdges(
   questions: SurveyQuestion[],
-  groups: QuestionGroupInfo[],
   edges: FlowGraphEdge[]
 ) {
-  const linked = new Set(edges.map((edge) => `${edge.source}->${edge.target}`))
-
-  for (let index = 0; index < questions.length - 1; index++) {
-    const fromQuestion = questions[index]
-    const toQuestion = questions[index + 1]
-    const sameBranch = sharesFollowUpOption(fromQuestion, toQuestion)
-    if (hasShowIf(toQuestion) && !sameBranch) continue
-    if (hasOutgoingBranches(questions, fromQuestion) && !sameBranch) continue
-    if (hasShowIf(fromQuestion) && !hasShowIf(toQuestion)) continue
-
-    const fromGroup = fromQuestion.config.groupId
-    const toGroup = toQuestion.config.groupId
-    if (fromGroup && fromGroup === toGroup) continue
-
-    if (toGroup && toGroup !== fromGroup) {
-      const group = groups.find((item) => item.id === toGroup)
-      if (group && group.questionIds[0] !== toQuestion.id) continue
-    }
-
-    const source =
-      fromGroup && fromGroup !== toGroup
-        ? groupNodeId(fromGroup)
-        : fromQuestion.id
-    const target =
-      toGroup && toGroup !== fromGroup ? groupNodeId(toGroup) : toQuestion.id
-    const key = `${source}->${target}`
-    if (source === target || linked.has(key)) continue
-    linked.add(key)
+  const link = (from: SurveyQuestion, to: SurveyQuestion) => {
+    const id = `seq:${from.id}:${to.id}`
+    if (edges.some((edge) => edge.id === id)) return
     edges.push({
-      id: `seq:${source}:${target}`,
-      source,
-      target,
+      id,
+      source: from.id,
+      target: to.id,
       sourceHandle: "next",
       targetHandle: "in",
       kind: "sequence",
       color: "#8a8d86",
-      sourceQuestionId: fromQuestion.id,
-      targetQuestionId: toQuestion.id,
+      sourceQuestionId: from.id,
+      targetQuestionId: to.id,
     })
+  }
+
+  const topLevel = questions.filter((question) => branchRefs(question).length === 0)
+  for (let index = 0; index < topLevel.length - 1; index++) {
+    link(topLevel[index], topLevel[index + 1])
+  }
+
+  for (const source of questions) {
+    for (const option of source.options) {
+      const members = flowMemberIds(questions, source.id, option.id).map(
+        (id) => questions.find((question) => question.id === id)!
+      )
+      for (let index = 0; index < members.length - 1; index++) {
+        link(members[index], members[index + 1])
+      }
+    }
   }
 }
 
@@ -764,7 +578,6 @@ export function parseBranchEdgeId(id: string): {
 
 export function validateFlow(questions: SurveyQuestion[]): FlowIssue[] {
   const issues: FlowIssue[] = []
-  const ids = new Set(questions.map((question) => question.id))
 
   if (questions.length === 0) {
     issues.push({
@@ -774,47 +587,33 @@ export function validateFlow(questions: SurveyQuestion[]): FlowIssue[] {
     return issues
   }
 
-  for (const question of questions) {
-    const rule = normalizeShowIf(question.config.showIf)
-    if (!rule) continue
-    for (const condition of rule.conditions) {
-      if (!ids.has(condition.questionId)) {
+  questions.forEach((question, index) => {
+    for (const ref of branchRefs(question)) {
+      const sourceIndex = questions.findIndex((item) => item.id === ref.questionId)
+      const label = question.prompt || "Untitled"
+      if (sourceIndex < 0) {
         issues.push({
           severity: "error",
-          message: `“${question.prompt || "Untitled"}” depends on a missing question.`,
+          message: `“${label}” belongs to a flow of a question that no longer exists.`,
         })
-      }
-      if (condition.questionId === question.id) {
+      } else if (sourceIndex >= index) {
         issues.push({
           severity: "error",
-          message: `“${question.prompt || "Untitled"}” cannot depend on itself.`,
+          message: `“${label}” must come after the question that opens its flow.`,
         })
       }
     }
-  }
-
-  const graph = adjacency(questions)
-  for (const [from, tos] of graph) {
-    for (const to of tos) {
-      if (canReach(graph, to, from)) {
-        issues.push({
-          severity: "error",
-          message: "A branch loops back on itself. Loops are not allowed.",
-        })
-        break
-      }
-    }
-  }
+  })
 
   for (const source of questions) {
-    if (source.options.length === 0) continue
-    const unlinked = source.options.filter(
-      (option) => collectBranchTargets(questions, source.id, option.id).length === 0
+    if (!canBranchFromQuestion(source)) continue
+    const routed = source.options.filter(
+      (option) => flowMemberIds(questions, source.id, option.id).length > 0
     )
-    if (unlinked.length > 0 && unlinked.length < source.options.length) {
+    if (routed.length > 0 && routed.length < source.options.length) {
       issues.push({
-        severity: "warning",
-        message: `Some answers on “${source.prompt || "Untitled"}” are not connected yet — those respondents continue in order.`,
+        severity: "info",
+        message: `On “${source.prompt || "Untitled"}”, answers without a flow go straight to the next shared question.`,
       })
     }
   }
@@ -829,6 +628,23 @@ export function validateFlow(questions: SurveyQuestion[]): FlowIssue[] {
   }
 
   return uniqueIssues(issues)
+}
+
+export function describeRouting(
+  questions: SurveyQuestion[],
+  question: SurveyQuestion
+): string[] {
+  return labeledAnswerOptions(question.options)
+    .map((option) => {
+      const members = flowMemberIds(questions, question.id, option.id)
+      if (members.length === 0) return null
+      const names = members.map((id) => {
+        const index = questions.findIndex((item) => item.id === id)
+        return `Q${index + 1}`
+      })
+      return `${option.label} → ${names.join(", ")}`
+    })
+    .filter((line): line is string => Boolean(line))
 }
 
 function uniqueIssues(issues: FlowIssue[]): FlowIssue[] {

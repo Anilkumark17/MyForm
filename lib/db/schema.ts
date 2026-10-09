@@ -63,6 +63,8 @@ export const projects = pgTable("projects", {
     .$type<number[]>()
     .notNull()
     .default([]),
+  /** Form settings (shuffle, progress, close rules). See lib/forms/settings.ts */
+  settings: jsonb("settings").$type<Record<string, unknown>>(),
   /** OT revision for collaborative question editing. */
   questionsRevision: integer("questions_revision").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })

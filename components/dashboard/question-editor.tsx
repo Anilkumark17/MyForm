@@ -1,18 +1,34 @@
 "use client"
 
-import { GitBranchIcon, ListIcon, PlusIcon, Trash2Icon } from "lucide-react"
-import { useEffect, useEffectEvent, useRef, useState, useTransition } from "react"
+import {
+  GitBranchIcon,
+  ListIcon,
+  PlusIcon,
+  SplitIcon,
+  Trash2Icon,
+} from "lucide-react"
+import {
+  Fragment,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useTransition,
+} from "react"
 
 import { ComparisonOptionEditor } from "@/components/dashboard/comparison-option-editor"
 import {
   BranchingOverview,
   ConditionalLogicEditor,
 } from "@/components/dashboard/conditional-logic-editor"
+import { ValidationEditor } from "@/components/dashboard/validation-editor"
+import { SectionHeader } from "@/components/dashboard/section-header"
 import { FlowBuilder } from "@/components/dashboard/flow-builder/flow-builder"
 import { ImageFieldInput } from "@/components/dashboard/image-field-input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -25,8 +41,9 @@ import { useQuestionCollab } from "@/hooks/use-question-collab"
 import { saveProjectQuestions } from "@/lib/projects/actions"
 import {
   cleanupConditionalLogic,
-  hasShowIf,
-  questionsDependingOn,
+  hasOutgoingBranches,
+  hasSections,
+  questionsTargeting,
 } from "@/lib/survey/conditional"
 import {
   questionTypesByCategory,
@@ -232,6 +249,25 @@ export function QuestionEditor({
     updateQuestions([...questions, createEmptyQuestion("long_text")])
   }
 
+  function addSectionBreak(questionId: string) {
+    updateQuestions(
+      questions.map((question) =>
+        question.id === questionId
+          ? {
+              ...question,
+              config: { ...question.config, sectionStart: { title: "" } },
+            }
+          : question
+      )
+    )
+  }
+
+  function addSection() {
+    const first = createEmptyQuestion("long_text")
+    first.config.sectionStart = { title: "" }
+    updateQuestions([...questions, first])
+  }
+
   function updateOption(
     questionId: string,
     optionId: string,
@@ -382,7 +418,13 @@ export function QuestionEditor({
         <ViewToggle view={view} onChange={setView} />
       </div>
 
-      {view === "flow" ? (
+      {view === "flow" && hasSections(questions) ? (
+        <div className="surface rounded-lg px-6 py-10 text-center text-sm text-muted-foreground">
+          Flow Builder is for forms without sections. This form uses sections,
+          so set routing in the Form Editor with “After section” and per-answer
+          “Go to section”.
+        </div>
+      ) : view === "flow" ? (
         <FlowBuilder questions={questions} onChange={updateQuestions} />
       ) : (
         <>
@@ -390,12 +432,21 @@ export function QuestionEditor({
 
       {questions.map((question, index) => {
         const meta = QUESTION_TYPE_MAP[question.type]
-        const branchedFrom = hasShowIf(question)
-        const branchesOthers =
-          questionsDependingOn(questions, question.id).length > 0
+        const branchedFrom =
+          questionsTargeting(questions, question.id).length > 0
+        const branchesOthers = hasOutgoingBranches(questions, question)
+        const sectionBreak =
+          index === 0 || Boolean(question.config.sectionStart)
         return (
+          <Fragment key={question.id}>
+          {sectionBreak && (index > 0 || hasSections(questions)) ? (
+            <SectionHeader
+              question={question}
+              questions={questions}
+              onQuestionsChange={updateQuestions}
+            />
+          ) : null}
           <div
-            key={question.id}
             className="surface rounded-lg p-4"
           >
             <div className="mb-3 flex items-start justify-between gap-3">
@@ -407,21 +458,34 @@ export function QuestionEditor({
                   <Badge variant="outline">{question.config.groupName}</Badge>
                 ) : null}
                 {branchedFrom ? (
-                  <Badge variant="secondary">Conditional</Badge>
+                  <Badge variant="secondary">In a flow</Badge>
                 ) : null}
                 {branchesOthers ? (
                   <Badge variant="outline">Branches</Badge>
                 ) : null}
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => removeQuestion(question.id)}
-                aria-label="Delete question"
-              >
-                <Trash2Icon />
-              </Button>
+              <div className="flex items-center gap-1">
+                {index > 0 && !question.config.sectionStart ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => addSectionBreak(question.id)}
+                  >
+                    <SplitIcon data-icon="inline-start" />
+                    Start section here
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => removeQuestion(question.id)}
+                  aria-label="Delete question"
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
             </div>
 
             <div className="grid gap-4">
@@ -725,16 +789,56 @@ export function QuestionEditor({
                 </div>
               ) : null}
 
+              {["single_select", "dropdown", "multi_select", "multi_select_dropdown"].includes(question.type) ? (
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={Boolean(question.config.shuffleOptions)}
+                      onCheckedChange={(next) =>
+                        updateQuestion(question.id, {
+                          config: {
+                            ...question.config,
+                            shuffleOptions: Boolean(next),
+                          },
+                        })
+                      }
+                    />
+                    Shuffle option order
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={Boolean(question.config.allowOther)}
+                      onCheckedChange={(next) =>
+                        updateQuestion(question.id, {
+                          config: {
+                            ...question.config,
+                            allowOther: Boolean(next),
+                          },
+                        })
+                      }
+                    />
+                    Add “Other” option
+                  </label>
+                </div>
+              ) : null}
+
+              <ValidationEditor
+                question={question}
+                onChange={(validation) =>
+                  updateQuestion(question.id, {
+                    config: { ...question.config, validation },
+                  })
+                }
+              />
+
               <ConditionalLogicEditor
                 question={question}
                 questions={questions}
-                onQuestionChange={(patch) =>
-                  updateQuestion(question.id, patch)
-                }
                 onQuestionsChange={updateQuestions}
               />
             </div>
           </div>
+          </Fragment>
         )
       })}
         </>
@@ -746,6 +850,12 @@ export function QuestionEditor({
           <PlusIcon data-icon="inline-start" />
           Add question
         </Button>
+        ) : null}
+        {view === "editor" && questions.length > 0 ? (
+          <Button type="button" variant="outline" onClick={addSection}>
+            <SplitIcon data-icon="inline-start" />
+            Add section
+          </Button>
         ) : null}
       </div>
 

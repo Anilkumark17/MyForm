@@ -43,11 +43,10 @@ import { BranchFlowEdge } from "@/components/dashboard/flow-builder/flow-edges"
 import { QuestionEditSheet } from "@/components/dashboard/flow-builder/question-edit-sheet"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { cleanupConditionalLogic } from "@/lib/survey/conditional"
+import { cleanupConditionalLogic, clearTargetsTo } from "@/lib/survey/conditional"
 import {
   applyNodePositions,
   buildFlowGraph,
-  connectMerge,
   connectOptionToTargets,
   createQuestionGroup,
   disconnectOptionFromTargets,
@@ -302,12 +301,8 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
         setNotice("That connection would loop the form. Choose a later question.")
         return null
       }
-      let next = questionsRef.current
-      for (const targetId of targets) {
-        next = connectMerge(next, sourceId, targetId)
-      }
-      setNotice(null)
-      return next
+      setNotice("Drag from an answer dot to pick that answer's flow.")
+      return null
     }
 
     if (!handle.startsWith("option:")) return null
@@ -367,7 +362,7 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
     if (!connection.source || !connection.target) return false
     if (connection.source === connection.target) return false
     const handle = connection.sourceHandle ?? ""
-    if (handle !== "next" && !handle.startsWith("option:")) return false
+    if (!handle.startsWith("option:")) return false
     const targets = resolveConnectionTargets(
       questionsRef.current,
       connection.target
@@ -438,16 +433,7 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
         onChange(renameQuestionGroup(questionsRef.current, groupId, name))
       },
       clearIncoming: (id: string) => {
-        onChange(
-          questionsRef.current.map((question) =>
-            question.id === id
-              ? {
-                  ...question,
-                  config: { ...question.config, showIf: undefined },
-                }
-              : question
-          )
-        )
+        onChange(clearTargetsTo(questionsRef.current, id))
       },
     }),
     [onChange]
@@ -457,9 +443,9 @@ function FlowCanvas({ questions, onChange }: FlowBuilderProps) {
     <>
       <p className="text-sm leading-6 text-muted-foreground">
         <GitBranchIcon className="mr-1 inline size-4 align-text-bottom" />
-        Drag from an answer dot to a later question to branch. Click a
+        Drag from an answer dot to every later question that answer should see — each answer gets its own flow. Click a
         connection to select it, then Remove connection — or use the X on the
-        line. Each answer only continues to the questions you connect.
+        line. Questions with no connection are shown to everyone.
       </p>
       {notice ? (
         <Alert>

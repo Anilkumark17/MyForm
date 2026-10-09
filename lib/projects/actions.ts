@@ -24,6 +24,7 @@ import type {
   ProjectFormState,
   SaveQuestionsState,
 } from "@/lib/projects/types"
+import { normalizeFormSettings } from "@/lib/forms/settings"
 import { normalizeSurveyQuestion } from "@/lib/survey/questions"
 
 const projectSchema = z.object({
@@ -286,4 +287,28 @@ export async function saveProjectQuestions(
 
   revalidatePath(`/dashboard/projects/${project.id}`)
   return { ok: true, revision: accepted.revision }
+}
+
+export async function saveFormSettings(
+  projectId: string,
+  settingsInput: unknown
+): Promise<{ ok?: boolean; error?: string }> {
+  const user = await requireUser()
+  if (!user) {
+    redirect("/login")
+  }
+
+  const project = await getEditableProject(projectId, user.id)
+  if (!project) {
+    return { error: "Project not found." }
+  }
+
+  await db
+    .update(projects)
+    .set({ settings: normalizeFormSettings(settingsInput), updatedAt: new Date() })
+    .where(eq(projects.id, project.id))
+
+  revalidatePath(`/dashboard/projects/${project.id}`)
+  revalidatePath(`/f/${project.id}`)
+  return { ok: true }
 }

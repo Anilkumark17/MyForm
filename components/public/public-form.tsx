@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react"
 
+import { SectionedForm } from "@/components/public/sectioned-form"
 import { ComparisonField } from "@/components/public/comparison-field"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -20,10 +21,17 @@ import {
   themeToCssVars,
   type EmbedTheme,
 } from "@/lib/forms/embed-theme"
+import {
+  DEFAULT_FORM_SETTINGS,
+  applyShuffle,
+  type FormSettings,
+} from "@/lib/forms/settings"
+import { validateAnswer } from "@/lib/survey/validation"
 import { isComparisonAnswerComplete } from "@/lib/survey/comparison"
 import {
   answersForVisiblePath,
   getVisibleQuestions,
+  hasSections,
 } from "@/lib/survey/conditional"
 import type { SurveyQuestion } from "@/lib/survey/questions"
 import { cn } from "@/lib/utils"
@@ -43,6 +51,19 @@ type PublicFormProps = {
   formName: string
   questions: SurveyQuestion[]
   theme: EmbedTheme
+  settings?: FormSettings
+}
+
+type InnerFormProps = Required<PublicFormProps>
+
+const submittedKey = (formId: string) => `myform:submitted:${formId}`
+
+export function markSubmitted(formId: string) {
+  try {
+    window.localStorage.setItem(submittedKey(formId), "1")
+  } catch {
+    // storage may be blocked
+  }
 }
 
 type SubmitResult = {
@@ -50,7 +71,7 @@ type SubmitResult = {
   flagStatus: string
 }
 
-function isQuestionAnswered(question: SurveyQuestion, value: unknown) {
+export function isQuestionAnswered(question: SurveyQuestion, value: unknown) {
   if (question.type === "comparison_choice") {
     return isComparisonAnswerComplete(question, value)
   }
@@ -69,11 +90,58 @@ function isQuestionAnswered(question: SurveyQuestion, value: unknown) {
 }
 
 export function PublicForm({
+  settings = DEFAULT_FORM_SETTINGS,
+  ...props
+}: PublicFormProps) {
+  const [seed, setSeed] = useState<number | null>(null)
+  const [alreadyAnswered, setAlreadyAnswered] = useState(false)
+
+  useEffect(() => {
+    setSeed(Math.floor(Math.random() * 2 ** 31))
+    if (!settings.limitOneResponse) return
+    try {
+      setAlreadyAnswered(
+        window.localStorage.getItem(submittedKey(props.formId)) === "1"
+      )
+    } catch {
+      // storage may be blocked
+    }
+  }, [props.formId, settings.limitOneResponse])
+
+  const questions = useMemo(
+    () =>
+      seed == null ? props.questions : applyShuffle(props.questions, settings, seed),
+    [props.questions, settings, seed]
+  )
+
+  if (alreadyAnswered) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-6">
+        <div className="max-w-sm text-center">
+          <p className="font-heading text-xl font-semibold">{props.formName}</p>
+          <p className="prose-muted mt-2">
+            You have already responded to this form.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  const inner: InnerFormProps = { ...props, questions, settings }
+  return hasSections(questions) ? (
+    <SectionedForm {...inner} />
+  ) : (
+    <StepForm {...inner} />
+  )
+}
+
+function StepForm({
   formId,
   formName,
   questions,
   theme,
-}: PublicFormProps) {
+  settings,
+}: InnerFormProps) {
   const startedAtRef = useRef<number>(Date.now())
   const fieldFocusStarted = useRef<Record<string, number>>({})
   const perFieldTimeMs = useRef<Record<string, number>>({})
@@ -251,6 +319,7 @@ export function PublicForm({
       }
 
       clearDraft(formId)
+      markSubmitted(formId)
       setResult({
         trustScore: data.trustScore ?? 0,
         flagStatus: data.flagStatus ?? "clean",
@@ -264,6 +333,11 @@ export function PublicForm({
     if (!canProceed(current, value)) {
       if (options?.auto) return
       setError("Please answer this question to continue.")
+      return
+    }
+    const invalid = validateAnswer(current, value)
+    if (invalid) {
+      if (!options?.auto) setError(invalid)
       return
     }
     const nextVisible = getVisibleQuestions(questions, {
@@ -335,11 +409,17 @@ export function PublicForm({
           <h1 className="font-heading mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
             Thank you
           </h1>
-          <p className="mt-4 text-lg leading-7 opacity-70">
-            Your response for{" "}
-            <span className="font-medium opacity-100">{formName}</span> was
-            received.
-          </p>
+          {settings.confirmationMessage.trim() ? (
+            <p className="mt-4 whitespace-pre-wrap text-lg leading-7 opacity-70">
+              {settings.confirmationMessage}
+            </p>
+          ) : (
+            <p className="mt-4 text-lg leading-7 opacity-70">
+              Your response for{" "}
+              <span className="font-medium opacity-100">{formName}</span> was
+              received.
+            </p>
+          )}
         </div>
       </div>
     )
@@ -360,18 +440,20 @@ export function PublicForm({
       className="relative flex min-h-screen flex-col bg-[var(--embed-bg)] text-[var(--embed-text)]"
       data-embed={theme.embed ? "true" : "false"}
     >
-      <div
-        className="h-1 w-full bg-[color-mix(in_oklab,var(--embed-text)_12%,transparent)]"
-        aria-hidden="true"
-      >
+      {settings.showProgress ? (
         <div
-          className="h-full transition-[width] duration-300 ease-out"
-          style={{
-            width: `${progress}%`,
-            backgroundColor: "var(--embed-accent)",
-          }}
-        />
-      </div>
+          className="h-1 w-full bg-[color-mix(in_oklab,var(--embed-text)_12%,transparent)]"
+          aria-hidden="true"
+        >
+          <div
+            className="h-full transition-[width] duration-300 ease-out"
+            style={{
+              width: `${progress}%`,
+              backgroundColor: "var(--embed-accent)",
+            }}
+          />
+        </div>
+      ) : null}
 
       <div className="flex items-center justify-between px-5 py-4 sm:px-8">
         {!theme.hideBrand ? (
@@ -384,7 +466,7 @@ export function PublicForm({
         ) : (
           <span />
         )}
-        {welcomeDone && visibleQuestions.length > 0 ? (
+        {settings.showProgress && welcomeDone && visibleQuestions.length > 0 ? (
           <p className="text-sm tabular-nums opacity-55">
             {currentIndex + 1} / {visibleQuestions.length}
           </p>
@@ -468,7 +550,10 @@ export function PublicForm({
                   question={current}
                   value={answers[current.id]}
                   onChange={(value) => {
-                    if (AUTO_ADVANCE_TYPES.has(current.type)) {
+                    if (
+                      AUTO_ADVANCE_TYPES.has(current.type) &&
+                      !current.config.allowOther
+                    ) {
                       handleChoice(current, value)
                       return
                     }
@@ -534,7 +619,7 @@ export function PublicForm({
   )
 }
 
-function FieldInput({
+export function FieldInput({
   question,
   value,
   onChange,
@@ -549,6 +634,34 @@ function FieldInput({
 }) {
   const stringValue = typeof value === "string" ? value : ""
   const arrayValue = Array.isArray(value) ? value.map(String) : []
+
+  if (question.config.allowOther) {
+    if (question.type === "single_select" || question.type === "dropdown") {
+      return (
+        <SingleChoiceWithOther
+          question={question}
+          value={stringValue}
+          onChange={onChange}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      )
+    }
+    if (
+      question.type === "multi_select" ||
+      question.type === "multi_select_dropdown"
+    ) {
+      return (
+        <MultiChoiceWithOther
+          question={question}
+          value={arrayValue}
+          onChange={onChange}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      )
+    }
+  }
 
   switch (question.type) {
     case "comparison_choice":
@@ -779,4 +892,137 @@ function FieldInput({
         />
       )
   }
+}
+
+const OTHER_VALUE = "__other__"
+
+const choiceRowClass =
+  "flex cursor-pointer items-center gap-3 rounded-lg border border-border/80 bg-background/40 px-4 py-3.5 text-base leading-snug transition-colors hover:bg-background/70 has-[[data-checked]]:border-[var(--brand-signal)]"
+
+type OtherFieldProps<T> = {
+  question: SurveyQuestion
+  value: T
+  onChange: (value: unknown) => void
+  onFocus: () => void
+  onBlur: () => void
+}
+
+function SingleChoiceWithOther({
+  question,
+  value,
+  onChange,
+  onFocus,
+  onBlur,
+}: OtherFieldProps<string>) {
+  const known = question.options.some(
+    (option) => (option.value ?? option.label) === value
+  )
+  const [otherActive, setOtherActive] = useState(false)
+  const isOther = otherActive || (value !== "" && !known)
+
+  return (
+    <RadioGroup
+      id={question.id}
+      value={isOther ? OTHER_VALUE : value}
+      onValueChange={(next) => {
+        if (next === OTHER_VALUE) {
+          setOtherActive(true)
+          onChange("")
+        } else {
+          setOtherActive(false)
+          onChange(next)
+        }
+      }}
+      className="gap-2.5"
+    >
+      {question.options.map((option) => (
+        <label
+          key={option.id}
+          className={choiceRowClass}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        >
+          <RadioGroupItem value={option.value ?? option.label} />
+          {option.label}
+        </label>
+      ))}
+      <label className={choiceRowClass}>
+        <RadioGroupItem value={OTHER_VALUE} />
+        <span>Other:</span>
+        <Input
+          aria-label="Other answer"
+          value={isOther ? value : ""}
+          disabled={!isOther}
+          onChange={(event) => onChange(event.target.value)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          className="h-9 flex-1 bg-background/60"
+        />
+      </label>
+    </RadioGroup>
+  )
+}
+
+function MultiChoiceWithOther({
+  question,
+  value,
+  onChange,
+  onFocus,
+  onBlur,
+}: OtherFieldProps<string[]>) {
+  const optionValues = question.options.map(
+    (option) => option.value ?? option.label
+  )
+  const otherText = value.find((item) => !optionValues.includes(item)) ?? ""
+  const [otherActive, setOtherActive] = useState(false)
+  const isOther = otherActive || otherText !== ""
+  const base = value.filter((item) => optionValues.includes(item))
+
+  return (
+    <div className="space-y-2.5">
+      {question.options.map((option) => {
+        const optionValue = option.value ?? option.label
+        return (
+          <label key={option.id} className={choiceRowClass}>
+            <Checkbox
+              checked={value.includes(optionValue)}
+              onCheckedChange={(next) => {
+                onFocus()
+                onChange(
+                  next
+                    ? [...value, optionValue]
+                    : value.filter((item) => item !== optionValue)
+                )
+                onBlur()
+              }}
+            />
+            {option.label}
+          </label>
+        )
+      })}
+      <label className={choiceRowClass}>
+        <Checkbox
+          checked={isOther}
+          onCheckedChange={(next) => {
+            setOtherActive(Boolean(next))
+            if (!next) onChange(base)
+          }}
+        />
+        <span>Other:</span>
+        <Input
+          aria-label="Other answer"
+          value={otherText}
+          disabled={!isOther}
+          onChange={(event) =>
+            onChange(
+              event.target.value ? [...base, event.target.value] : base
+            )
+          }
+          onFocus={onFocus}
+          onBlur={onBlur}
+          className="h-9 flex-1 bg-background/60"
+        />
+      </label>
+    </div>
+  )
 }

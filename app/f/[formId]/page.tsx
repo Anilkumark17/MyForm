@@ -1,9 +1,13 @@
-import { eq } from "drizzle-orm"
+import { count, eq } from "drizzle-orm"
 import { notFound } from "next/navigation"
 
 import { PublicForm } from "@/components/public/public-form"
 import { db } from "@/lib/db"
-import { projects } from "@/lib/db/schema"
+import { projects, submissions } from "@/lib/db/schema"
+import {
+  closedReason,
+  normalizeFormSettings,
+} from "@/lib/forms/settings"
 import { parseEmbedTheme } from "@/lib/forms/embed-theme"
 import { forPublicForm, parseSurveyQuestions } from "@/lib/survey/questions"
 
@@ -25,6 +29,7 @@ export default async function PublicFormPage({
       id: projects.id,
       name: projects.name,
       questions: projects.questions,
+      settings: projects.settings,
     })
     .from(projects)
     .where(eq(projects.id, formId))
@@ -32,6 +37,24 @@ export default async function PublicFormPage({
 
   if (!form) {
     notFound()
+  }
+
+  const settings = normalizeFormSettings(form.settings)
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(submissions)
+    .where(eq(submissions.formId, form.id))
+  const closed = closedReason(settings, total)
+
+  if (closed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="max-w-sm text-center">
+          <p className="font-heading text-xl font-semibold">{form.name}</p>
+          <p className="prose-muted mt-2 whitespace-pre-wrap">{closed}</p>
+        </div>
+      </div>
+    )
   }
 
   const questions = forPublicForm(parseSurveyQuestions(form.questions))
@@ -62,6 +85,7 @@ export default async function PublicFormPage({
           formId={form.id}
           formName={form.name}
           questions={questions}
+          settings={settings}
           theme={theme}
         />
       </div>
@@ -74,6 +98,7 @@ export default async function PublicFormPage({
         formId={form.id}
         formName={form.name}
         questions={questions}
+        settings={settings}
         theme={{ ...theme, accent: theme.accent || "3ecf8e" }}
       />
     </div>

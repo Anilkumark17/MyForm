@@ -27,8 +27,6 @@ export const COMPARISON_OPTION_CONTENT_TYPES = [
 export type ComparisonOptionContentType =
   (typeof COMPARISON_OPTION_CONTENT_TYPES)[number]
 
-export type { ShowIfRule } from "@/lib/survey/conditional"
-
 export type ComparisonAnswer =
   | {
       mode: "single_select"

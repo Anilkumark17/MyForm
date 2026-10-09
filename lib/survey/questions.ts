@@ -3,7 +3,11 @@ import {
   QUESTION_TYPE_MAP,
   type QuestionTypeId,
 } from "@/lib/survey/question-types"
-import { normalizeShowIf, type ShowIfRule } from "@/lib/survey/conditional"
+import {
+  normalizeValidation,
+  type ValidationConfig,
+} from "@/lib/survey/validation"
+import { cleanupConditionalLogic, migrateLegacyShowIf } from "@/lib/survey/conditional"
 import type {
   ComparisonOptionContentType,
   ComparisonRevealMode,
@@ -46,8 +50,20 @@ export type QuestionConfig = {
   beforeAfterSlider?: boolean
   rateMin?: number
   rateMax?: number
-  /** Conditional visibility — show this question only when prior answers match */
-  showIf?: ShowIfRule
+  /** Answer validation rule (text and number questions) */
+  validation?: ValidationConfig
+  /** Randomise answer order for each respondent */
+  shuffleOptions?: boolean
+  /** Add an "Other" free-text choice */
+  allowOther?: boolean
+  /** Starts a new form section (page) at this question */
+  sectionStart?: { title: string; description?: string; after?: string }
+  /** Section routing: option id -> section id (first question id) or "__submit__" */
+  goTo?: Record<string, string>
+  /** Answer flows this question belongs to (shown only for those answers) */
+  branchOf?: Array<{ questionId: string; optionId: string }>
+  /** @deprecated old show-if rules; converted to goTo/next on load */
+  showIf?: unknown
   /** Flow builder: question set this card belongs to */
   groupId?: string
   groupName?: string
@@ -272,7 +288,10 @@ export function applyTypeChange(
     options: keepOptions ? question.options : defaultOptionsForType(type),
     config: {
       ...defaultConfigForType(type),
-      showIf: question.config.showIf,
+      sectionStart: question.config.sectionStart,
+      goTo: undefined,
+      branchOf: undefined,
+      validation: undefined,
       groupId: question.config.groupId,
       groupName: question.config.groupName,
       flowX: question.config.flowX,
@@ -297,7 +316,9 @@ export function duplicateQuestion(question: SurveyQuestion): SurveyQuestion {
     })),
     config: {
       ...question.config,
-      showIf: undefined,
+      sectionStart: undefined,
+      goTo: undefined,
+      branchOf: undefined,
       flowX: (question.config.flowX ?? 0) + 48,
       flowY: (question.config.flowY ?? 0) + 48,
     },
@@ -362,6 +383,38 @@ function normalizeOptions(raw: unknown): AnswerOption[] {
   return options
 }
 
+function normalizeSectionStart(raw: unknown): QuestionConfig["sectionStart"] {
+  if (!raw || typeof raw !== "object") return undefined
+  const item = raw as Record<string, unknown>
+  return {
+    title: String(item.title ?? ""),
+    description: asOptionalString(item.description),
+    after: asOptionalString(item.after),
+  }
+}
+
+function normalizeGoTo(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const entries = Object.entries(raw as Record<string, unknown>)
+    .map(([optionId, target]) => [optionId, String(target ?? "").trim()] as const)
+    .filter(([optionId, target]) => optionId && target)
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
+function normalizeBranchOf(raw: unknown): QuestionConfig["branchOf"] {
+  if (!Array.isArray(raw)) return undefined
+  const refs = raw
+    .map((item) => {
+      const ref = (item ?? {}) as Record<string, unknown>
+      return {
+        questionId: String(ref.questionId ?? "").trim(),
+        optionId: String(ref.optionId ?? "").trim(),
+      }
+    })
+    .filter((ref) => ref.questionId && ref.optionId)
+  return refs.length > 0 ? refs : undefined
+}
+
 export function normalizeSurveyQuestion(raw: unknown): SurveyQuestion | null {
   if (typeof raw === "string") {
     const prompt = raw.trim()
@@ -406,7 +459,11 @@ export function normalizeSurveyQuestion(raw: unknown): SurveyQuestion | null {
   const config: QuestionConfig = {
     ...baseConfig,
     ...incoming,
-    showIf: normalizeShowIf(incoming.showIf ?? item.showIf),
+    showIf: incoming.showIf ?? item.showIf,
+    branchOf: normalizeBranchOf(incoming.branchOf),
+    validation: normalizeValidation(incoming.validation),
+    sectionStart: normalizeSectionStart(incoming.sectionStart),
+    goTo: normalizeGoTo(incoming.goTo),
     required:
       incoming.required != null
         ? Boolean(incoming.required)
@@ -445,9 +502,13 @@ export function parseSurveyQuestions(raw: string | null): SurveyQuestion[] {
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => normalizeSurveyQuestion(item))
-      .filter((item): item is SurveyQuestion => Boolean(item))
+    return cleanupConditionalLogic(
+      migrateLegacyShowIf(
+        parsed
+          .map((item) => normalizeSurveyQuestion(item))
+          .filter((item): item is SurveyQuestion => Boolean(item))
+      )
+    )
   } catch {
     return []
   }

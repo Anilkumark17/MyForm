@@ -1,5 +1,6 @@
 "use client"
 
+import { FormSettingsPanel } from "@/components/dashboard/form-settings-panel"
 import { EmbedBuilder } from "@/components/dashboard/embed-builder"
 import { FraudInsights } from "@/components/dashboard/fraud-insights"
 import { GenerateQuestionsPanel } from "@/components/dashboard/generate-questions-panel"
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Submission } from "@/lib/db/schema"
+import type { FormSettings } from "@/lib/forms/settings"
 import type { SurveyQuestion } from "@/lib/survey/questions"
 
 type ProjectWorkspaceProps = {
@@ -55,6 +57,7 @@ type ProjectWorkspaceProps = {
       ready: boolean
     }
   } | null
+  settings: FormSettings
 }
 
 export function ProjectWorkspace({
@@ -70,6 +73,7 @@ export function ProjectWorkspace({
   generationsLimit,
   generationsUnlimited,
   baselines,
+  settings,
 }: ProjectWorkspaceProps) {
   return (
     <div className="mt-8">
@@ -103,6 +107,12 @@ export function ProjectWorkspace({
               Invite
             </TabsTrigger>
           ) : null}
+          <TabsTrigger
+            value="settings"
+            className="rounded-none px-3 pb-3 pt-0 data-active:bg-transparent"
+          >
+            Settings
+          </TabsTrigger>
           <TabsTrigger
             value="embed"
             className="rounded-none px-3 pb-3 pt-0 data-active:bg-transparent"
@@ -151,6 +161,14 @@ export function ProjectWorkspace({
             />
           </TabsContent>
         ) : null}
+
+        <TabsContent value="settings" className="mt-0">
+          <FormSettingsPanel
+            projectId={projectId}
+            initialSettings={settings}
+            responseCount={submissions.length}
+          />
+        </TabsContent>
 
         <TabsContent value="embed" className="mt-0">
           <EmbedBuilder formId={projectId} />

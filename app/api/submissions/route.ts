@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { processSubmission } from "@/lib/fraud/process-submission"
+import { ValidationError, processSubmission } from "@/lib/fraud/process-submission"
 
 const bodySchema = z.object({
   formId: z.string().uuid(),
@@ -37,6 +37,9 @@ export async function POST(request: Request) {
       createdAt: result.submission.createdAt,
     })
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 422 })
+    }
     console.error("POST /api/submissions failed:", error)
     const message =
       error instanceof Error ? error.message : "Could not process submission."

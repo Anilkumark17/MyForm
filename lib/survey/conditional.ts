@@ -4,21 +4,17 @@ import {
 } from "@/lib/survey/comparison"
 import type { AnswerOption, SurveyQuestion } from "@/lib/survey/questions"
 
-export const SHOW_IF_OPERATORS = ["is", "is_not"] as const
+/**
+ * Per-answer flows.
+ *
+ * Questions run top to bottom. On a choice, dropdown or yes/no question each
+ * answer can own a flow: a set of later questions (`config.branchOf` on each
+ * member). Picking that answer runs only that answer's flow, then everyone
+ * continues with the next question that belongs to no flow. Flows can nest.
+ */
+export type BranchRef = { questionId: string; optionId: string }
 
-export type ShowIfOperator = (typeof SHOW_IF_OPERATORS)[number]
-
-export type ShowIfCondition = {
-  questionId: string
-  operator: ShowIfOperator
-  /** Option ids (preferred), option values, or free-text answers */
-  values: string[]
-}
-
-export type ShowIfRule = {
-  logic: "and" | "or"
-  conditions: ShowIfCondition[]
-}
+const BRANCHING_TYPES = new Set(["single_select", "dropdown", "yes_no"])
 
 const ANSWER_KEYS_TO_KEEP = [
   "utm_source",
@@ -27,72 +23,8 @@ const ANSWER_KEYS_TO_KEEP = [
   "utm_campaign",
 ]
 
-function asStringArray(raw: unknown): string[] {
-  if (Array.isArray(raw)) {
-    return raw.map((item) => String(item).trim()).filter(Boolean)
-  }
-  if (typeof raw === "string" && raw.trim()) return [raw.trim()]
-  return []
-}
-
-function asOperator(raw: unknown): ShowIfOperator {
-  return raw === "is_not" || raw === "not_equals" ? "is_not" : "is"
-}
-
-export function normalizeShowIf(raw: unknown): ShowIfRule | undefined {
-  if (!raw || typeof raw !== "object") return undefined
-  const rule = raw as Record<string, unknown>
-
-  const fromConditions = Array.isArray(rule.conditions)
-    ? rule.conditions
-        .map((item) => normalizeCondition(item))
-        .filter((item): item is ShowIfCondition => Boolean(item))
-    : []
-
-  if (fromConditions.length > 0) {
-    return {
-      logic: rule.logic === "or" ? "or" : "and",
-      conditions: fromConditions,
-    }
-  }
-
-  // Legacy: { questionId, equals }
-  const questionId = String(rule.questionId ?? "").trim()
-  const equals = String(rule.equals ?? "").trim()
-  if (questionId && equals) {
-    return {
-      logic: "and",
-      conditions: [
-        {
-          questionId,
-          operator: asOperator(rule.operator),
-          values: [equals],
-        },
-      ],
-    }
-  }
-
-  const single = normalizeCondition(rule)
-  if (!single) return undefined
-  return { logic: "and", conditions: [single] }
-}
-
-function normalizeCondition(raw: unknown): ShowIfCondition | null {
-  if (!raw || typeof raw !== "object") return null
-  const item = raw as Record<string, unknown>
-  const questionId = String(item.questionId ?? "").trim()
-  if (!questionId) return null
-  const values = asStringArray(item.values ?? item.equals ?? item.value)
-  if (values.length === 0) return null
-  return {
-    questionId,
-    operator: asOperator(item.operator),
-    values,
-  }
-}
-
-export function hasShowIf(question: SurveyQuestion): boolean {
-  return Boolean(normalizeShowIf(question.config.showIf))
+export function canBranchFrom(question: SurveyQuestion): boolean {
+  return BRANCHING_TYPES.has(question.type) && question.options.length > 0
 }
 
 export function previousQuestions(
@@ -113,10 +45,6 @@ export function laterQuestions(
   return questions.slice(index + 1)
 }
 
-export function canBranchFrom(question: SurveyQuestion): boolean {
-  return question.options.length > 0
-}
-
 export function questionRefLabel(
   questions: SurveyQuestion[],
   questionId: string,
@@ -135,7 +63,10 @@ function optionMatchers(option: AnswerOption): string[] {
     .filter(Boolean)
 }
 
-function answerTokens(question: SurveyQuestion | undefined, answer: unknown): string[] {
+function answerTokens(
+  question: SurveyQuestion | undefined,
+  answer: unknown
+): string[] {
   if (answer == null || answer === "") return []
 
   if (question && isComparisonQuestion(question)) {
@@ -178,219 +109,142 @@ export function selectedOptionIds(
     .map((option) => option.id)
 }
 
-function valueMatchesAnswer(
-  source: SurveyQuestion,
-  answer: unknown,
-  expected: string
-): boolean {
-  const tokens = answerTokens(source, answer)
-  if (tokens.includes(expected)) return true
-
-  const selected = selectedOptionIds(source, answer)
-  if (selected.includes(expected)) return true
-
-  const option = source.options.find((item) =>
-    optionMatchers(item).includes(expected)
-  )
-  if (!option) return false
-
-  const matchers = optionMatchers(option)
-  return (
-    selected.includes(option.id) ||
-    tokens.some((token) => matchers.includes(token))
-  )
+export function branchRefs(question: SurveyQuestion): BranchRef[] {
+  return question.config.branchOf ?? []
 }
 
-function conditionMatches(
-  condition: ShowIfCondition,
-  answers: Record<string, unknown>,
-  allQuestions: SurveyQuestion[],
-  visiting: Set<string>
-): boolean {
-  const source = allQuestions.find((question) => question.id === condition.questionId)
-  if (!source) return false
-  if (!isQuestionVisible(source, answers, allQuestions, visiting)) return false
-
-  const answer = answers[condition.questionId]
-  const tokens = answerTokens(source, answer)
-  if (tokens.length === 0) return false
-
-  const hit = condition.values.some((value) =>
-    valueMatchesAnswer(source, answer, value)
-  )
-  return condition.operator === "is_not" ? !hit : hit
-}
-
-/** Whether a question should be shown given current answers. Nested rules require ancestors to be visible too. */
-export function isQuestionVisible(
-  question: SurveyQuestion,
-  answers: Record<string, unknown>,
-  allQuestions: SurveyQuestion[],
-  visiting: Set<string> = new Set()
-): boolean {
-  const rule = normalizeShowIf(question.config.showIf)
-  if (!rule) return true
-  if (visiting.has(question.id)) return false
-
-  const nextVisiting = new Set(visiting)
-  nextVisiting.add(question.id)
-
-  const results = rule.conditions.map((condition) =>
-    conditionMatches(condition, answers, allQuestions, nextVisiting)
-  )
-  return rule.logic === "or" ? results.some(Boolean) : results.every(Boolean)
-}
-
-export function followUpIdsForOption(
+/** Question ids that belong to this answer's flow, in form order. */
+export function flowMemberIds(
   questions: SurveyQuestion[],
   sourceId: string,
   optionId: string
 ): string[] {
   return questions
-    .filter((question) => isFollowUpForOption(question, sourceId, optionId))
+    .filter((question) =>
+      branchRefs(question).some(
+        (ref) => ref.questionId === sourceId && ref.optionId === optionId
+      )
+    )
     .map((question) => question.id)
 }
 
-export function hasOutgoingBranches(
-  questions: SurveyQuestion[],
-  source: SurveyQuestion
-): boolean {
-  return source.options.some(
-    (option) => followUpIdsForOption(questions, source.id, option.id).length > 0
-  )
+export const SUBMIT_TARGET = "__submit__"
+
+export type FormSection = {
+  /** Id of the first question in the section */
+  id: string
+  title: string
+  description?: string
+  after?: string
+  questions: SurveyQuestion[]
 }
 
-function questionIdsGatedBySource(
-  questions: SurveyQuestion[],
-  sourceId: string
-): Set<string> {
-  const gated = new Set<string>()
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const question of questions) {
-      if (gated.has(question.id)) continue
-      const rule = normalizeShowIf(question.config.showIf)
-      if (!rule) continue
-      const dependsOnSource = rule.conditions.some(
-        (condition) =>
-          condition.questionId === sourceId || gated.has(condition.questionId)
-      )
-      if (dependsOnSource) {
-        gated.add(question.id)
-        changed = true
-      }
+/** Split the form into sections at every question marked `sectionStart`. */
+export function getSections(questions: SurveyQuestion[]): FormSection[] {
+  const sections: FormSection[] = []
+  questions.forEach((question, index) => {
+    const start = question.config.sectionStart
+    if (index === 0 || start) {
+      sections.push({
+        id: question.id,
+        title: start?.title ?? "",
+        description: start?.description,
+        after: start?.after,
+        questions: [question],
+      })
+    } else {
+      sections[sections.length - 1].questions.push(question)
     }
-  }
-  return gated
+  })
+  return sections
 }
 
-function indexAfterBranchRegion(
-  questions: SurveyQuestion[],
-  sourceId: string
-): number {
-  const gated = questionIdsGatedBySource(questions, sourceId)
-  let end = -1
-  for (let index = 0; index < questions.length; index++) {
-    if (gated.has(questions[index].id)) end = index
-  }
-  return end < 0 ? -1 : end + 1
-}
-
-function continueAfterBranch(
-  questions: SurveyQuestion[],
-  sourceId: string | undefined,
-  visit: (question: SurveyQuestion) => void
-) {
-  if (!sourceId) return
-  const after = indexAfterBranchRegion(questions, sourceId)
-  if (after >= 0 && after < questions.length) visit(questions[after])
+export function hasSections(questions: SurveyQuestion[]): boolean {
+  return questions.some((question, index) => index > 0 && question.config.sectionStart)
 }
 
 /**
- * Questions on the answered path. Option connections are go-to rules: pick A
- * and only A's follow-ups run, sibling branches are skipped, and unrelated
- * questions sitting inside a branch block are not shown.
+ * Where the respondent goes when leaving a section: the first answered
+ * question with a matching go-to rule, else the section's "after" setting,
+ * else the next section. Returns SUBMIT_TARGET to finish, undefined for next.
  */
+export function targetAfterSection(
+  section: FormSection,
+  answers: Record<string, unknown>
+): string | undefined {
+  for (const question of section.questions) {
+    if (!canBranchFrom(question) || !question.config.goTo) continue
+    for (const optionId of selectedOptionIds(question, answers[question.id])) {
+      const target = question.config.goTo[optionId]
+      if (target) return target
+    }
+  }
+  return section.after || undefined
+}
+
+/** Sections the respondent will pass through, in order. Jumps go forward only. */
+export function getSectionPath(
+  questions: SurveyQuestion[],
+  answers: Record<string, unknown>
+): FormSection[] {
+  const sections = getSections(questions)
+  const path: FormSection[] = []
+  let index = 0
+  while (index >= 0 && index < sections.length) {
+    const section = sections[index]
+    path.push(section)
+    const target = targetAfterSection(section, answers)
+    if (target === SUBMIT_TARGET) break
+    const jump = target ? sections.findIndex((item) => item.id === target) : -1
+    index = jump > index ? jump : index + 1
+  }
+  return path
+}
+
+/** Questions the respondent will see, in order, given the answers so far. */
 export function getVisibleQuestions(
   questions: SurveyQuestion[],
   answers: Record<string, unknown>
 ): SurveyQuestion[] {
-  if (questions.length === 0) return []
+  if (hasSections(questions)) {
+    return getSectionPath(questions, answers).flatMap(
+      (section) => section.questions
+    )
+  }
+  const path: SurveyQuestion[] = []
+  const seen = new Set<string>()
 
-  const byId = new Map(questions.map((question) => [question.id, question]))
-  const reachable = new Set<string>()
+  const visit = (question: SurveyQuestion) => {
+    if (seen.has(question.id)) return
+    seen.add(question.id)
+    path.push(question)
+    if (!canBranchFrom(question)) return
 
-  const visit = (question: SurveyQuestion | undefined) => {
-    if (!question || reachable.has(question.id)) return
-    if (!isQuestionVisible(question, answers, questions)) return
-    reachable.add(question.id)
-
-    const index = questions.findIndex((item) => item.id === question.id)
-
-    if (hasOutgoingBranches(questions, question)) {
-      const selected = selectedOptionIds(question, answers[question.id])
-      const targets = [
-        ...new Set(
-          selected.flatMap((optionId) =>
-            followUpIdsForOption(questions, question.id, optionId)
-          )
-        ),
-      ]
-        .map((id) => byId.get(id))
-        .filter((item): item is SurveyQuestion => Boolean(item))
-        .sort(
-          (left, right) =>
-            questions.findIndex((item) => item.id === left.id) -
-            questions.findIndex((item) => item.id === right.id)
-        )
-
-      for (const target of targets) visit(target)
-      return
-    }
-
-    const next = questions[index + 1]
-    if (!next) {
-      continueAfterBranch(
-        questions,
-        normalizeShowIf(question.config.showIf)?.conditions[0]?.questionId,
-        visit
+    const selected = selectedOptionIds(question, answers[question.id])
+    const members = questions.filter((item) =>
+      branchRefs(item).some(
+        (ref) =>
+          ref.questionId === question.id && selected.includes(ref.optionId)
       )
-      return
-    }
-
-    if (isQuestionVisible(next, answers, questions) && hasShowIf(next)) {
-      visit(next)
-      return
-    }
-
-    if (
-      hasShowIf(question) &&
-      (!hasShowIf(next) || !isQuestionVisible(next, answers, questions))
-    ) {
-      continueAfterBranch(
-        questions,
-        normalizeShowIf(question.config.showIf)?.conditions[0]?.questionId,
-        visit
-      )
-      return
-    }
-
-    if (!isQuestionVisible(next, answers, questions)) {
-      continueAfterBranch(
-        questions,
-        normalizeShowIf(next.config.showIf)?.conditions[0]?.questionId ??
-          normalizeShowIf(question.config.showIf)?.conditions[0]?.questionId,
-        visit
-      )
-      return
-    }
-
-    visit(next)
+    )
+    for (const member of members) visit(member)
   }
 
-  visit(questions[0])
-  return questions.filter((question) => reachable.has(question.id))
+  for (const question of questions) {
+    if (branchRefs(question).length > 0) continue
+    visit(question)
+  }
+  return path
+}
+
+export function isQuestionVisible(
+  question: SurveyQuestion,
+  answers: Record<string, unknown>,
+  allQuestions: SurveyQuestion[]
+): boolean {
+  return getVisibleQuestions(allQuestions, answers).some(
+    (item) => item.id === question.id
+  )
 }
 
 /** Keep answers for the visible path (plus hidden fields / attribution keys). */
@@ -398,16 +252,12 @@ export function answersForVisiblePath(
   questions: SurveyQuestion[],
   answers: Record<string, unknown>
 ): Record<string, unknown> {
-  const visibleIds = new Set(
+  const keepIds = new Set(
     getVisibleQuestions(questions, answers).map((question) => question.id)
   )
-  const keepIds = new Set(
-    questions
-      .filter(
-        (question) => question.type === "hidden" || visibleIds.has(question.id)
-      )
-      .map((question) => question.id)
-  )
+  for (const question of questions) {
+    if (question.type === "hidden") keepIds.add(question.id)
+  }
 
   const next: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(answers)) {
@@ -418,211 +268,215 @@ export function answersForVisiblePath(
   return next
 }
 
-export function createDefaultShowIf(
-  previous: SurveyQuestion[]
-): ShowIfRule | undefined {
-  if (previous.length === 0) return undefined
-  const source =
-    [...previous].reverse().find((question) => question.options.length > 0) ??
-    previous[previous.length - 1]
-  return {
-    logic: "and",
-    conditions: [
-      {
-        questionId: source.id,
-        operator: "is",
-        values: source.options[0] ? [source.options[0].id] : [],
-      },
-    ],
-  }
-}
-
-/** Keep incomplete rules in the editor (empty match values) that normalizeShowIf would drop. */
-export function showIfForEditor(raw: unknown): ShowIfRule | undefined {
-  const normalized = normalizeShowIf(raw)
-  if (normalized) return normalized
-  if (!raw || typeof raw !== "object") return undefined
-  const rule = raw as Partial<ShowIfRule>
-  if (!Array.isArray(rule.conditions) || rule.conditions.length === 0) {
-    return undefined
-  }
-  const conditions = rule.conditions
-    .map((item) => {
-      const questionId = String(item?.questionId ?? "").trim()
-      if (!questionId) return null
-      return {
-        questionId,
-        operator: asOperator(item?.operator),
-        values: asStringArray(item?.values),
-      } satisfies ShowIfCondition
-    })
-    .filter((item): item is ShowIfCondition => Boolean(item))
-  if (conditions.length === 0) return undefined
-  return {
-    logic: rule.logic === "or" ? "or" : "and",
-    conditions,
-  }
-}
-
-export function emptyCondition(source: SurveyQuestion): ShowIfCondition {
-  return {
-    questionId: source.id,
-    operator: "is",
-    values: source.options[0] ? [source.options[0].id] : [],
-  }
-}
-
-export function isFollowUpForOption(
-  followUp: SurveyQuestion,
-  sourceId: string,
-  optionId: string
+/** True when some answer of this question owns a flow. */
+export function hasOutgoingBranches(
+  questions: SurveyQuestion[],
+  question: SurveyQuestion
 ): boolean {
-  const rule = normalizeShowIf(followUp.config.showIf)
-  if (!rule) return false
-  return rule.conditions.some(
-    (condition) =>
-      condition.questionId === sourceId &&
-      condition.operator === "is" &&
-      condition.values.includes(optionId)
+  return questions.some((item) =>
+    branchRefs(item).some((ref) => ref.questionId === question.id)
   )
 }
 
-export function toggleFollowUpForOption(
+/** Flow sources this question belongs to. */
+export function questionsTargeting(
+  questions: SurveyQuestion[],
+  questionId: string
+): SurveyQuestion[] {
+  const member = questions.find((question) => question.id === questionId)
+  if (!member) return []
+  const sources = new Set(branchRefs(member).map((ref) => ref.questionId))
+  return questions.filter((question) => sources.has(question.id))
+}
+
+function withBranchOf(
+  question: SurveyQuestion,
+  refs: BranchRef[]
+): SurveyQuestion {
+  return {
+    ...question,
+    config: {
+      ...question.config,
+      branchOf: refs.length > 0 ? refs : undefined,
+    },
+  }
+}
+
+/** Add or remove a question from an answer's flow. */
+export function toggleFlowMember(
   questions: SurveyQuestion[],
   sourceId: string,
   optionId: string,
-  followUpId: string,
+  memberId: string,
   enabled: boolean
 ): SurveyQuestion[] {
   return questions.map((question) => {
-    if (question.id !== followUpId) return question
-    const rule = normalizeShowIf(question.config.showIf) ?? {
-      logic: "and" as const,
-      conditions: [] as ShowIfCondition[],
-    }
+    if (question.id !== memberId) return question
+    const others = branchRefs(question).filter(
+      (ref) => !(ref.questionId === sourceId && ref.optionId === optionId)
+    )
+    return withBranchOf(
+      question,
+      enabled ? [...others, { questionId: sourceId, optionId }] : others
+    )
+  })
+}
 
-    if (enabled) {
-      const existing = rule.conditions.find(
-        (condition) =>
-          condition.questionId === sourceId && condition.operator === "is"
+/** Remove a question from every flow it belongs to. */
+export function clearTargetsTo(
+  questions: SurveyQuestion[],
+  questionId: string
+): SurveyQuestion[] {
+  return questions.map((question) =>
+    question.id === questionId ? withBranchOf(question, []) : question
+  )
+}
+
+/** Drop flow memberships that point at missing or earlier questions/options. */
+export function cleanupConditionalLogic(
+  questions: SurveyQuestion[]
+): SurveyQuestion[] {
+  const indexById = new Map(
+    questions.map((question, index) => [question.id, index])
+  )
+
+  const sectionIds = new Set(
+    questions
+      .filter((question, index) => index === 0 || question.config.sectionStart)
+      .map((question) => question.id)
+  )
+  const validSectionTarget = (target: string | undefined, index: number) =>
+    !target ||
+    target === SUBMIT_TARGET ||
+    (sectionIds.has(target) && (indexById.get(target) ?? -1) > index)
+
+  return questions.map((question, index) => {
+    const withSections = cleanupSectionRouting(
+      question,
+      index,
+      validSectionTarget
+    )
+    if (withSections !== question) {
+      return cleanupFlowRefs(withSections, index, questions, indexById)
+    }
+    return cleanupFlowRefs(question, index, questions, indexById)
+  })
+}
+
+function cleanupSectionRouting(
+  question: SurveyQuestion,
+  index: number,
+  validSectionTarget: (target: string | undefined, index: number) => boolean
+): SurveyQuestion {
+  const { goTo, sectionStart } = question.config
+  const optionIds = new Set(question.options.map((option) => option.id))
+  const cleanGoTo =
+    goTo && canBranchFrom(question)
+      ? Object.fromEntries(
+          Object.entries(goTo).filter(
+            ([optionId, target]) =>
+              optionIds.has(optionId) && validSectionTarget(target, index)
+          )
+        )
+      : undefined
+  const goToChanged =
+    JSON.stringify(cleanGoTo ?? {}) !== JSON.stringify(goTo ?? {})
+  const afterChanged =
+    sectionStart?.after != null && !validSectionTarget(sectionStart.after, index)
+  if (!goToChanged && !afterChanged) return question
+  return {
+    ...question,
+    config: {
+      ...question.config,
+      goTo:
+        cleanGoTo && Object.keys(cleanGoTo).length > 0 ? cleanGoTo : undefined,
+      sectionStart:
+        sectionStart && afterChanged
+          ? { ...sectionStart, after: undefined }
+          : sectionStart,
+    },
+  }
+}
+
+function cleanupFlowRefs(
+  question: SurveyQuestion,
+  index: number,
+  questions: SurveyQuestion[],
+  indexById: Map<string, number>
+): SurveyQuestion {
+  {
+    const refs = question.config.branchOf
+    if (!refs && question.config.showIf === undefined) return question
+
+    const valid = (refs ?? []).filter((ref) => {
+      const sourceIndex = indexById.get(ref.questionId) ?? -1
+      if (sourceIndex < 0 || sourceIndex >= index) return false
+      const source = questions[sourceIndex]
+      return (
+        canBranchFrom(source) &&
+        source.options.some((option) => option.id === ref.optionId)
       )
-      if (existing) {
-        if (!existing.values.includes(optionId)) {
-          existing.values = [...existing.values, optionId]
-        }
-      } else {
-        rule.conditions.push({
-          questionId: sourceId,
-          operator: "is",
-          values: [optionId],
-        })
-      }
-      return {
-        ...question,
-        config: { ...question.config, showIf: rule },
-      }
+    })
+    if (
+      question.config.showIf === undefined &&
+      valid.length === (refs ?? []).length
+    ) {
+      return question
     }
-
-    const conditions = rule.conditions
-      .map((condition) => {
-        if (condition.questionId !== sourceId || condition.operator !== "is") {
-          return condition
-        }
-        return {
-          ...condition,
-          values: condition.values.filter((value) => value !== optionId),
-        }
-      })
-      .filter((condition) => condition.values.length > 0)
-
     return {
       ...question,
       config: {
         ...question.config,
-        showIf: conditions.length > 0 ? { ...rule, conditions } : undefined,
+        showIf: undefined,
+        branchOf: valid.length > 0 ? valid : undefined,
       },
     }
-  })
+  }
 }
 
-/** Drop rules that point at deleted questions or options. */
-export function cleanupConditionalLogic(
+/** Convert old "show this question when…" rules into per-answer flows. */
+export function migrateLegacyShowIf(
   questions: SurveyQuestion[]
 ): SurveyQuestion[] {
-  const ids = new Set(questions.map((question) => question.id))
+  if (!questions.some((question) => question.config.showIf !== undefined)) {
+    return questions
+  }
 
-  return questions.map((question) => {
-    const rule = normalizeShowIf(question.config.showIf)
-    if (!rule) {
-      if (!question.config.showIf) return question
-      return {
-        ...question,
-        config: { ...question.config, showIf: undefined },
-      }
-    }
-
-    const conditions = rule.conditions
-      .filter(
-        (condition) =>
-          ids.has(condition.questionId) && condition.questionId !== question.id
-      )
-      .map((condition) => {
-        const source = questions.find((item) => item.id === condition.questionId)
-        if (!source || source.options.length === 0) return condition
-        const allowed = new Set(
-          source.options.flatMap((option) => optionMatchers(option))
-        )
-        return {
-          ...condition,
-          values: condition.values.filter((value) => allowed.has(value)),
+  const byId = new Map(questions.map((question) => [question.id, question]))
+  return cleanupConditionalLogic(
+    questions.map((question) => {
+      const rule = question.config.showIf as
+        | { conditions?: unknown }
+        | undefined
+      if (!rule) return question
+      const refs = [...branchRefs(question)]
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions : []
+      for (const raw of conditions) {
+        const condition = raw as {
+          questionId?: unknown
+          operator?: unknown
+          values?: unknown
         }
-      })
-      .filter((condition) => condition.values.length > 0)
-
-    const nextRule =
-      conditions.length > 0 ? { ...rule, conditions } : undefined
-    const prev = normalizeShowIf(question.config.showIf)
-    const unchanged =
-      JSON.stringify(prev) === JSON.stringify(nextRule) &&
-      Boolean(question.config.showIf) === Boolean(nextRule)
-    if (unchanged) return question
-
-    return {
-      ...question,
-      config: { ...question.config, showIf: nextRule },
-    }
-  })
-}
-
-export function describeShowIf(
-  question: SurveyQuestion,
-  questions: SurveyQuestion[]
-): string | null {
-  const rule = normalizeShowIf(question.config.showIf)
-  if (!rule) return null
-
-  const parts = rule.conditions.map((condition) => {
-    const source = questions.find((item) => item.id === condition.questionId)
-    const sourceLabel = questionRefLabel(questions, condition.questionId)
-    const valueLabels = condition.values.map((value) => {
-      const option = source?.options.find((item) =>
-        optionMatchers(item).includes(value)
+        if (condition.operator === "is_not") continue
+        const source = byId.get(String(condition.questionId ?? ""))
+        if (!source || !canBranchFrom(source)) continue
+        const values = Array.isArray(condition.values)
+          ? condition.values.map((value) => String(value).trim())
+          : []
+        for (const option of source.options) {
+          if (!values.some((value) => optionMatchers(option).includes(value))) {
+            continue
+          }
+          const exists = refs.some(
+            (ref) => ref.questionId === source.id && ref.optionId === option.id
+          )
+          if (!exists) refs.push({ questionId: source.id, optionId: option.id })
+        }
+      }
+      return withBranchOf(
+        { ...question, config: { ...question.config, showIf: undefined } },
+        refs
       )
-      return option?.label ?? value
     })
-    const verb = condition.operator === "is_not" ? "is not" : "is"
-    return `${sourceLabel} ${verb} ${valueLabels.join(" or ")}`
-  })
-
-  return parts.join(rule.logic === "or" ? " or " : " and ")
-}
-
-export function questionsDependingOn(
-  questions: SurveyQuestion[],
-  sourceId: string
-): SurveyQuestion[] {
-  return questions.filter((question) => {
-    const rule = normalizeShowIf(question.config.showIf)
-    return rule?.conditions.some((condition) => condition.questionId === sourceId)
-  })
+  )
 }

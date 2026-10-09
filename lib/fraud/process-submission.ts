@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm"
+import { count, eq } from "drizzle-orm"
 
 import {
   estimateSurveyWordCount,
@@ -10,6 +10,8 @@ import {
 } from "@/lib/fraud/score-submission"
 import { deriveFieldMetrics } from "@/lib/fraud/signals"
 import { notifyOwnerFakeFlagged } from "@/lib/notifications/fake-flagged"
+import { closedReason, normalizeFormSettings } from "@/lib/forms/settings"
+import { validateAnswer } from "@/lib/survey/validation"
 import { parseSurveyQuestions } from "@/lib/survey/questions"
 import {
   answersForVisiblePath,
@@ -23,6 +25,9 @@ import {
   type FraudStatus,
   type Submission,
 } from "@/lib/db/schema"
+
+/** A submission the server refuses for a reason the respondent can see. */
+export class ValidationError extends Error {}
 
 export type IncomingSubmission = {
   formId: string
@@ -123,6 +128,7 @@ export async function processSubmission(
     .select({
       id: projects.id,
       questions: projects.questions,
+      settings: projects.settings,
       fraudRunningMean: projects.fraudRunningMean,
       fraudRunningM2: projects.fraudRunningM2,
       fraudSampleCount: projects.fraudSampleCount,
@@ -137,12 +143,30 @@ export async function processSubmission(
     throw new Error("Form not found.")
   }
 
+  const formSettings = normalizeFormSettings(form.settings)
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(submissions)
+    .where(eq(submissions.formId, form.id))
+  const closed = closedReason(formSettings, total)
+  if (closed) {
+    throw new ValidationError(closed)
+  }
+
   const questions = parseSurveyQuestions(form.questions)
   const answers = answersForVisiblePath(questions, input.answers ?? {})
   const visibleQuestions = getVisibleQuestions(questions, answers).filter(
     (question) => question.type !== "hidden"
   )
   const visibleIds = new Set(visibleQuestions.map((question) => question.id))
+  for (const question of visibleQuestions) {
+    const message = validateAnswer(question, answers[question.id])
+    if (message) {
+      throw new ValidationError(
+        `“${question.prompt || "Untitled question"}”: ${message}`
+      )
+    }
+  }
   const perFieldTimeMs = Object.fromEntries(
     Object.entries(asNumberMap(input.perFieldTimeMs)).filter(([key]) =>
       visibleIds.has(key)
